@@ -15,7 +15,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
-from data.market import is_live, make_exchange, make_public_exchange
+from data.market import make_exchange, make_public_exchange, mode
 from execution.executor import make_executor
 from graph.workflow import build_graph, make_checkpointer, run_once
 from llm.client import LLMClient
@@ -24,10 +24,6 @@ from monitoring.logger import setup_logging
 from monitoring.web import make_server
 
 log = logging.getLogger("main")
-
-
-def mode(settings: dict) -> str:
-    return "LIVE" if is_live(settings) else "PAPER" if settings["paper_trading"] else "TESTNET"
 
 
 def make_market(settings: dict):

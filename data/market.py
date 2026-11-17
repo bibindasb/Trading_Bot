@@ -12,6 +12,10 @@ def is_live(settings: dict) -> bool:
     return settings["live_trading"] is True and os.getenv("LIVE_TRADING", "").lower() == "true"
 
 
+def mode(settings: dict) -> str:
+    return "LIVE" if is_live(settings) else "PAPER" if settings["paper_trading"] else "TESTNET"
+
+
 def make_exchange(settings: dict) -> ccxt.Exchange:
     exchange = getattr(ccxt, settings["exchange"])({
         "apiKey": os.getenv("EXCHANGE_API_KEY"),

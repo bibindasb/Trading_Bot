@@ -99,7 +99,7 @@ def test_report_page_runs_inside_the_bot(monkeypatch, tmp_path):
     try:
         host, port = server.server_address[:2]
         with urllib.request.urlopen(f"http://{host}:{port}/") as r:
-            assert r.status == 200 and "Trading bot report" in r.read().decode()
+            assert r.status == 200 and "<title>Trading bot</title>" in r.read().decode()
     finally:
         server.shutdown()
 

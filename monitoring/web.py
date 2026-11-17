@@ -1,4 +1,5 @@
-"""Read-only report page: recent runs with each agent's report, the decision and what the executor did.
+"""Read-only report page, written for people new to trading: what the bot decided, why, and how the
+account is doing, in plain words with simple bars. Technical detail sits behind "show more".
 
 It reads the run records the bot writes to logs/bot.jsonl, so it needs nothing from the running bot.
 Headlines and model text are untrusted: everything is HTML-escaped and the page runs no scripts.
@@ -9,35 +10,59 @@ Standalone: .venv/bin/python -m monitoring.web
 import html
 import json
 import os
+import re
 from collections import deque
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import yaml
+
+from data.market import mode
+
 RUN_MARK = '"msg": "run: '
 CSS = """
-:root{--bg:#f6f7f9;--card:#fff;--text:#1d2129;--muted:#5b6472;--line:#dde1e7;--buy:#0a7a3d;--sell:#b42318;
---hold:#5b6472;--warn-bg:#fff4e5;--warn:#8a4b00}
-@media (prefers-color-scheme:dark){:root{--bg:#111418;--card:#1a1f26;--text:#e6e9ee;--muted:#9aa4b2;
---line:#2c333d;--buy:#4ade80;--sell:#f87171;--hold:#9aa4b2;--warn-bg:#3a2a12;--warn:#fbbf6a}}
-body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,sans-serif}
-main{max-width:1100px;margin:0 auto;padding:16px}
-h1{font-size:1.4rem;margin:0 0 4px}h3{font-size:1rem;margin:16px 0 6px}
-.stats{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0 20px}
-.stat{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;min-width:140px}
-.stat b{display:block;font-size:1.2rem}.muted{color:var(--muted)}
-details{background:var(--card);border:1px solid var(--line);border-radius:8px;margin:0 0 10px;padding:0 14px}
-summary{cursor:pointer;padding:12px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-.badge{font-weight:700;border-radius:4px;padding:1px 8px;border:1px solid currentColor}
-.BUY{color:var(--buy)}.SELL{color:var(--sell)}.HOLD,.HALTED{color:var(--hold)}
-.warn{background:var(--warn-bg);color:var(--warn);border-radius:6px;padding:8px 12px;margin:10px 0}
-.scroll{overflow-x:auto}
-table{border-collapse:collapse;width:100%;margin-bottom:8px}
-th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--muted);font-weight:600;font-size:.85rem}
-nav a{color:inherit;margin-right:10px}
+:root{--bg:#f4f6f8;--card:#fff;--text:#1b1f24;--muted:#5f6b7a;--line:#e2e6eb;--good:#0f7b3f;--good-bg:#e6f4ec;
+--bad:#b3261e;--bad-bg:#fbe9e7;--wait:#55606e;--wait-bg:#eef1f4;--warn:#8a4b00;--warn-bg:#fff3e0;--accent:#2f6fde}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#191e24;--text:#e8ebef;--muted:#9aa5b1;--line:#2b323b;
+--good:#5ad38d;--good-bg:#17311f;--bad:#ff8a80;--bad-bg:#3a1a18;--wait:#b6c0cc;--wait-bg:#232a32;--warn:#ffc46b;
+--warn-bg:#3a2a12;--accent:#7aa7ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1040px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.6rem;margin:0}h2{font-size:1.15rem;margin:28px 0 10px}h3{font-size:1rem;margin:0 0 10px}
+.sub{color:var(--muted);margin:4px 0 0}.live{color:var(--bad);font-weight:700}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.label{color:var(--muted);font-size:.85rem}.big{font-size:1.5rem;font-weight:700;margin:2px 0}
+.small{color:var(--muted);font-size:.85rem}
+.good{color:var(--good)}.bad{color:var(--bad)}.wait{color:var(--wait)}
+.decision{border-radius:12px;padding:16px 18px;margin-bottom:12px;border:1px solid var(--line)}
+.decision.BUY{background:var(--good-bg)}.decision.SELL{background:var(--bad-bg)}
+.decision.HOLD,.decision.PAUSED{background:var(--wait-bg)}
+.decision .big{font-size:1.35rem}
+.alert{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:10px 14px;margin:0 0 12px}
+.coin{display:flex;justify-content:space-between;gap:8px;font-weight:600;margin-top:10px}
+.coin:first-of-type{margin-top:0}
+.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:6px 0 2px}
+.bar i{display:block;height:100%;background:var(--accent)}
+.gauge{position:relative;height:8px;border-radius:4px;margin:6px 0 2px;
+background:linear-gradient(90deg,var(--bad),var(--line) 50%,var(--good))}
+.gauge i{position:absolute;top:-4px;width:4px;height:16px;border-radius:2px;background:var(--text);margin-left:-2px}
+details>summary{cursor:pointer;color:var(--accent)}
+details.check{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 16px;margin-bottom:8px}
+details.check>summary{color:var(--text);display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+details.check[open]>summary{margin-bottom:12px}
+.pill{border-radius:999px;padding:1px 10px;font-weight:700;font-size:.85rem}
+.pill.BUY{background:var(--good-bg);color:var(--good)}.pill.SELL{background:var(--bad-bg);color:var(--bad)}
+.pill.HOLD,.pill.PAUSED{background:var(--wait-bg);color:var(--wait)}
+ul{margin:6px 0 0;padding-left:20px}dt{font-weight:700;margin-top:8px}dd{margin:0}
+nav a{color:var(--accent);margin-right:12px}
 """
 
+
+# ---------- reading the log ----------
 
 def recent_runs(path: Path, n: int) -> list[dict]:
     """The last n run records, newest first. A missing file or a broken line is skipped, never an error."""
@@ -56,111 +81,301 @@ def recent_runs(path: Path, n: int) -> list[dict]:
     return list(reversed(runs))
 
 
+# ---------- plain-language helpers ----------
+
 def e(value) -> str:
     return "–" if value is None else html.escape(str(value))
 
 
-def pct(value) -> str:
-    return "–" if value is None else f"{value:.2%}"
+def usd(value) -> str:
+    return "–" if value is None else f"${value:,.2f}"
 
 
-def money(value) -> str:
-    return "–" if value is None else f"{value:,.2f}"
+def coin(symbol: str) -> str:
+    return e(symbol.split("/")[0])
 
 
-def table(headers: list[str], rows: list[list[str]]) -> str:
-    """Cells must already be escaped."""
-    head = "".join(f"<th scope='col'>{h}</th>" for h in headers)
-    body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows)
-    return f"<div class='scroll'><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>"
+def ago(ts: str | None, now: datetime) -> str:
+    try:
+        minutes = int((now - datetime.fromisoformat(ts)).total_seconds() // 60)
+    except (TypeError, ValueError):
+        return ""
+    if minutes < 1:
+        return "just now"
+    if minutes < 90:
+        return f"{minutes} min ago"
+    return f"{minutes // 60} h ago" if minutes < 48 * 60 else f"{minutes // 1440} days ago"
 
 
-def when(ts) -> str:
-    return e(f"{ts[:16].replace('T', ' ')} UTC" if ts else None)  # log times are UTC ISO strings
+def clock(ts: str | None, now: datetime) -> str:
+    try:
+        t = datetime.fromisoformat(ts)
+    except (TypeError, ValueError):
+        return e(ts)
+    return t.strftime("%H:%M UTC") if t.date() == now.date() else t.strftime("%d %b, %H:%M UTC")
 
 
-def action_of(run: dict) -> str:
-    return "HALTED" if run.get("halts") else (run.get("decision") or {}).get("action") or "?"
+def split_reason(text: str) -> tuple[str, str]:
+    """First sentence, and the rest."""
+    m = re.match(r"(.+?[.!?])\s+(.*)", text or "", re.S)
+    return (m.group(1), m.group(2)) if m else (text or "", "")
 
 
-def render_run(run: dict, expanded: bool) -> str:
-    symbols = list(run.get("prices") or {})
-    acct = run.get("account") or {}
-    decision, result, order = run.get("decision") or {}, run.get("result") or {}, run.get("order") or {}
-    action = action_of(run)
-    title = f"{e(decision.get('symbol'))}" if decision.get("symbol") else ""
-    parts = [f"<summary><span class='badge {e(action)}'>{e(action)}</span> {title}"
-             f"<span class='muted'>{when(run.get('ts'))}</span>"
-             + (f"<span>order {e(result.get('status'))}</span>" if result else "") + "</summary>"]
+TREND = {"up": ("▲", "Rising", "good"), "down": ("▼", "Falling", "bad"), "sideways": ("▬", "Flat", "wait")}
 
-    warnings = [f"Halted: {e(h)}" for h in run.get("halts") or []] + [f"Warning: {e(i)}" for i in run.get("issues") or []]
-    if warnings:
-        parts.append("<div class='warn'>" + "<br>".join(warnings) + "</div>")
 
-    held = ", ".join(f"{e(s)} {e(a)}" for s, a in (acct.get("positions") or {}).items() if a) or "none"
-    parts.append("<h3>Account</h3>" + table(
-        ["Equity", "Exposure", "Drawdown", "Today", "Held"],
-        [[money(acct.get("equity")), pct(acct.get("exposure_pct")), pct(acct.get("drawdown_pct")),
-          pct(acct.get("daily_pnl_pct")), held]]))
+def strength_word(x: float) -> str:
+    return "weak" if x < 0.34 else "moderate" if x < 0.67 else "strong"
 
-    if "market" in run:  # absent when the run was halted before the agents
-        market, sentiment = run.get("market") or {}, run.get("sentiment") or {}
-        invalid = "<span class='warn'>invalid output</span>"
-        rows = []
-        for s in symbols:
-            m = market.get(s)
-            rows.append([e(s), money((run.get("prices") or {}).get(s))] + (
-                [e(m["trend"]), e(m["strength"]), money(m["support"]), money(m["resistance"]), e(m["summary"])]
-                if m else [invalid, "", "", "", ""]))
-        parts.append("<h3>Market agent</h3>" + table(
-            ["Symbol", "Price", "Trend", "Strength", "Support", "Resistance", "Summary"], rows))
 
-        rows = []
-        for s in symbols:
-            sr, news = sentiment.get(s), (run.get("headlines") or {}).get(s) or []
-            items = "".join(f"<li>{e(h)}</li>" for h in news)
-            headlines = f"<details><summary>{len(news)} headlines</summary><ul>{items}</ul></details>" if news \
-                else "no headlines"
-            rows.append([e(s)] + ([e(sr["score"]), e(sr["confidence"])] if sr else [invalid, ""]) + [headlines])
-        parts.append("<h3>Sentiment agent</h3>" + table(["Symbol", "Score (-1 to 1)", "Confidence", "News"], rows))
+def mood(score: float) -> tuple[str, str, str]:
+    if score <= -0.5:
+        return "😟", "Very negative", "bad"
+    if score < -0.15:
+        return "🙁", "Negative", "bad"
+    if score <= 0.15:
+        return "😐", "Neutral", "wait"
+    return ("🙂", "Positive", "good") if score < 0.5 else ("😀", "Very positive", "good")
 
-        advice = run.get("advice")
-        parts.append("<h3>Risk advisor</h3>" + (table(
-            ["Max size", "Reduce", "Reasoning"],
-            [[e(advice["max_size"]), e(", ".join(advice.get("reduce") or []) or "none"), e(advice["reasoning"])]])
-            if advice else invalid))
 
-        parts.append("<h3>Decision agent</h3>" + table(
-            ["Action", "Symbol", "Size", "Stop loss", "Take profit", "Reasoning"],
-            [[e(decision.get("action")), e(decision.get("symbol")), e(decision.get("size")),
-              e(decision.get("stop_loss")), e(decision.get("take_profit")), e(decision.get("reasoning"))]]))
+def sure_word(confidence: float) -> str:
+    return "not sure" if confidence < 0.4 else "fairly sure" if confidence < 0.7 else "confident"
 
-    if order or result:
+
+def risk_word(max_size: float) -> str:
+    if max_size <= 0:
+        return "No new buys allowed"
+    return "Small buys only" if max_size < 0.5 else "Medium buys allowed" if max_size < 1 else "Full-size buys allowed"
+
+
+def plain_halt(reason: str) -> str:
+    if "drawdown" in reason:
+        return "Paused for safety: the account fell too far below its best value. Review, then delete the kill file."
+    if "daily loss" in reason:
+        return "Paused until tomorrow (UTC): today's losses reached the daily limit."
+    if reason.startswith("kill switch on:"):
+        return f"Paused by the kill switch: {reason.split(':', 1)[1].strip()}"
+    return f"Paused: {reason}"
+
+
+def plain_issue(issue: str) -> str:
+    if "no stop loss" in issue:
+        return f"{issue.split(':')[0]} has no safety exit (stop loss). Check it."
+    if "not managed" in issue:
+        return f"The account holds a coin the bot does not trade: {issue.split(' in account')[0]}"
+    return issue
+
+
+def action(run: dict) -> str:
+    return "PAUSED" if run.get("halts") else (run.get("decision") or {}).get("action") or "HOLD"
+
+
+def headline(run: dict) -> str:
+    act, decision = action(run), run.get("decision") or {}
+    symbol = decision.get("symbol") or ""
+    return {"PAUSED": "Paused: no trading", "BUY": f"Buy {coin(symbol)}", "SELL": f"Sell {coin(symbol)}"}.get(
+        act, "Waited: no trade this time")
+
+
+def outcome(run: dict) -> str | None:
+    result, order = run.get("result") or {}, run.get("order") or {}
+    status = result.get("status")
+    if status in ("filled", "partial"):
         placed = result.get("order") or {}
-        notes = "; ".join(result.get("reasons") or []) or result.get("error") or "; ".join(result.get("issues") or [])
-        parts.append("<h3>Risk guard and execution</h3>" + table(
-            ["Order", "Status", "Filled", "Price", "Notes"],
-            [[e(f"{order.get('side', '')} {order.get('amount') or 0:.6g} {order.get('symbol', '')}"),
-              e(result.get("status")), e(placed.get("filled")), e(placed.get("average")), e(notes or None)]]))
+        side = "Bought" if order.get("side") == "buy" else "Sold"
+        text = f"{side} {e(placed.get('filled'))} {coin(order.get('symbol', ''))} at {usd(placed.get('average'))}"
+        if order.get("stop_loss"):
+            text += f". Safety exit (stop loss) set at {usd(order['stop_loss'])}"
+        return text + "."
+    if status == "rejected":
+        return "Blocked by the safety rules: " + e("; ".join(result.get("reasons") or []))
+    if status in ("error", "unfilled"):
+        return "The trade did not go through: " + e(result.get("error") or "nothing was filled")
+    return None
 
-    return f"<details{' open' if expanded else ''}>{''.join(parts)}</details>"
+
+# ---------- page pieces ----------
+
+def bar(fraction: float) -> str:
+    return f"<div class='bar' aria-hidden='true'><i style='width:{max(0.0, min(1.0, fraction)) * 100:.0f}%'></i></div>"
 
 
-def page(runs: list[dict]) -> str:
-    latest = runs[0] if runs else {}
+def gauge(score: float) -> str:
+    return f"<div class='gauge' aria-hidden='true'><i style='left:{(max(-1.0, min(1.0, score)) + 1) * 50:.0f}%'></i></div>"
+
+
+def more(label: str, body: str) -> str:
+    return f"<details><summary>{label}</summary>{body}</details>" if body else ""
+
+
+def check_html(run: dict) -> str:
+    """One bot check: the decision, what happened, and the four agents."""
+    parts = [f"<div class='alert'>{e(plain_halt(h))}</div>" for h in run.get("halts") or []]
+    parts += [f"<div class='alert'>⚠️ {e(plain_issue(i))}</div>" for i in run.get("issues") or []]
+
+    decision = run.get("decision") or {}
+    reason = decision.get("reasoning") or ""
+    if reason.startswith("invalid"):
+        first, rest = "An AI agent did not answer properly, so the bot played safe and waited.", reason
+    else:
+        first, rest = split_reason(reason)
+    result = outcome(run)
+    parts.append(f"<div class='decision {e(action(run))}'><div class='label'>Decision</div>"
+                 f"<div class='big'>{headline(run)}</div>"
+                 + (f"<div>{e(first)}</div>" if first else "")
+                 + more("Full reasoning", f"<p>{e(rest)}</p>" if rest else "")
+                 + (f"<p><b>{result}</b></p>" if result else "") + "</div>")
+
+    if "market" not in run:  # paused before the agents ran
+        return "".join(parts)
+    prices = run.get("prices") or {}
+    symbols = list(prices)
+    no_answer = "<div class='small bad'>No valid answer</div>"
+
+    market = run.get("market") or {}
+    rows = []
+    for s in symbols:
+        m = market.get(s)
+        if not m:
+            rows.append(f"<div class='coin'><span>{coin(s)}</span></div>{no_answer}")
+            continue
+        arrow, word, css = TREND.get(m["trend"], ("?", m["trend"], "wait"))
+        rows.append(f"<div class='coin'><span>{coin(s)} {usd(prices.get(s))}</span>"
+                    f"<span class='{css}'>{arrow} {e(word)}</span></div>{bar(m['strength'])}"
+                    f"<div class='small'>Trend is {strength_word(m['strength'])}. "
+                    f"Floor {usd(m['support'])}, ceiling {usd(m['resistance'])}</div>"
+                    + more("Agent's note", f"<p>{e(m['summary'])}</p>"))
+    cards = [f"<div class='card'><h3>📈 Price trend</h3>{''.join(rows)}</div>"]
+
+    sentiment, headlines = run.get("sentiment") or {}, run.get("headlines") or {}
+    rows = []
+    for s in symbols:
+        sr, news = sentiment.get(s), headlines.get(s) or []
+        if not sr:
+            rows.append(f"<div class='coin'><span>{coin(s)}</span></div>{no_answer}")
+            continue
+        face, word, css = mood(sr["score"])
+        detail = "No news today" if not news else f"Based on {len(news)} headlines, {sure_word(sr['confidence'])}"
+        items = "".join(f"<li>{e(h)}</li>" for h in news)
+        rows.append(f"<div class='coin'><span>{coin(s)}</span><span class='{css}'>{face} {word}</span></div>"
+                    f"{gauge(sr['score'])}<div class='small'>{detail}</div>"
+                    + more("Headlines", f"<ul>{items}</ul>" if news else ""))
+    cards.append(f"<div class='card'><h3>📰 News mood</h3>{''.join(rows)}</div>")
+
+    advice = run.get("advice")
+    if advice:
+        first, rest = split_reason(advice["reasoning"])
+        reduce = f"<div class='small bad'>Suggests selling some: {e(', '.join(advice['reduce']))}</div>" \
+            if advice.get("reduce") else ""
+        cards.append(f"<div class='card'><h3>🛡️ Risk check</h3><div class='coin'><span>"
+                     f"{risk_word(advice['max_size'])}</span><span>{advice['max_size']:.0%}</span></div>"
+                     f"{bar(advice['max_size'])}{reduce}<div class='small'>{e(first)}</div>"
+                     + more("More", f"<p>{e(rest)}</p>" if rest else "") + "</div>")
+    else:
+        cards.append(f"<div class='card'><h3>🛡️ Risk check</h3>{no_answer}</div>")
+
+    acct = run.get("account") or {}
+    values = acct.get("position_values") or {}
+    held = "".join(f"<div class='coin'><span>{coin(s)} {e(a)}</span><span>{usd(values.get(s))}</span></div>"
+                   for s, a in (acct.get("positions") or {}).items() if a)
+    cards.append(f"<div class='card'><h3>💰 Account at this time</h3><div class='big'>{usd(acct.get('equity'))}</div>"
+                 + (held or "<div class='small'>No coins held: all cash</div>") + "</div>")
+    parts.append(f"<div class='grid'>{''.join(cards)}</div>")
+    return "".join(parts)
+
+
+def overview(runs: list[dict], settings: dict, now: datetime) -> str:
+    latest = runs[0]
     acct = latest.get("account") or {}
+    equity = acct.get("equity")
+    start = (settings.get("paper") or {}).get("starting_cash") if mode_of(settings) == "PAPER" else None
+    change = ""
+    if start and equity is not None:
+        diff = equity - start
+        css = "good" if diff > 0 else "bad" if diff < 0 else "wait"
+        change = f"<div class='small {css}'>{'+' if diff >= 0 else '−'}{usd(abs(diff))} since start ({diff / start:+.2%})</div>"
+
+    if latest.get("halts"):
+        status = "<div class='big bad'>⏸ Paused</div><div class='small'>See the alert below</div>"
+    else:
+        status = "<div class='big good'>● Running</div><div class='small'>No safety limits hit</div>"
+    every = settings.get("run_interval_minutes")
+    values = acct.get("position_values") or {}
+    holding = ", ".join(f"{coin(s)} {usd(values.get(s))}" for s, a in (acct.get("positions") or {}).items() if a)
     trades = sum((r.get("result") or {}).get("status") in ("filled", "partial") for r in runs)
-    stats = "".join(f"<div class='stat'><span class='muted'>{label}</span><b>{value}</b></div>" for label, value in [
-        ("Equity", money(acct.get("equity"))), ("Drawdown", pct(acct.get("drawdown_pct"))),
-        ("Today", pct(acct.get("daily_pnl_pct"))), ("Status", "HALTED" if latest.get("halts") else "active"),
-        (f"Trades in last {len(runs)} runs", trades), ("Last run", when(latest.get("ts")))])
-    nav = "".join(f"<a href='/?n={k}'>last {k}</a>" for k in (20, 50, 200))
-    body = "".join(render_run(r, i == 0) for i, r in enumerate(runs)) or "<p>No runs logged yet.</p>"
+    cards = [
+        ("Account value", f"<div class='big'>{usd(equity)}</div>{change}"),
+        ("Bot status", status),
+        ("Last check", f"<div class='big'>{ago(latest.get('ts'), now) or '–'}</div>"
+                       + (f"<div class='small'>Checks every {e(every)} minutes</div>" if every else "")),
+        ("Holding now", f"<div class='big'>{holding or 'Nothing'}</div>"
+                        f"<div class='small'>{trades} trade{'s' if trades != 1 else ''} in the last {len(runs)} checks</div>"),
+    ]
+    return "<div class='grid'>" + "".join(
+        f"<div class='card'><div class='label'>{label}</div>{body}</div>" for label, body in cards) + "</div>"
+
+
+GLOSSARY = [
+    ("Account value", "Cash plus the current value of any coins held."),
+    ("Paper trading", "Practice with pretend money on real prices. Nothing real is bought or sold."),
+    ("Price trend", "Whether the price has been going up, down or sideways lately, worked out from price charts."),
+    ("Floor and ceiling", "Prices where the coin recently stopped falling (floor, or support) or stopped rising "
+                          "(ceiling, or resistance)."),
+    ("News mood", "How good or bad today's news headlines look for the coin, from very negative to very positive."),
+    ("Risk check", "How big the next buy may be. It goes down when prices swing a lot or the account is losing."),
+    ("Stop loss (safety exit)", "An automatic sell if the price drops to a set level, so one bad trade cannot lose "
+                                "too much."),
+    ("Safety rules", "Fixed limits no AI can override: at most 2% of the account per trade, 20% in coins in total, "
+                     "a pause after a 3% loss in one day, and a full stop after a 10% drop from the best value "
+                     "(with default settings)."),
+    ("Paused", "The bot stopped trading because a safety limit was hit or someone turned on the kill switch."),
+]
+
+
+def mode_of(settings: dict) -> str | None:
+    try:
+        return mode(settings)
+    except (KeyError, TypeError):
+        return None
+
+
+def page(runs: list[dict], settings: dict | None = None, now: datetime | None = None) -> str:
+    settings, now = settings or {}, now or datetime.now(timezone.utc)
+    subtitle = {
+        "PAPER": "<p class='sub'>Practice mode: pretend money, real prices. Nothing real is bought or sold.</p>",
+        "TESTNET": "<p class='sub'>Test mode: orders go to Binance's test exchange with fake money.</p>",
+        "LIVE": "<p class='sub live'>LIVE: this bot is trading real money.</p>",
+    }.get(mode_of(settings), "")
+    if runs:
+        body = (overview(runs, settings, now)
+                + f"<h2>Latest check · {clock(runs[0].get('ts'), now)}</h2>" + check_html(runs[0]))
+        earlier = "".join(
+            f"<details class='check'><summary><b>{clock(r.get('ts'), now)}</b>"
+            f"<span class='pill {e(action(r))}'>{headline(r)}</span>"
+            + "".join(f"<span>{coin(s)} {TREND.get(m['trend'], ('?',))[0]}</span>"
+                      for s, m in (r.get("market") or {}).items() if m)
+            + (f"<span class='small'>{outcome(r)}</span>" if outcome(r) else "")
+            + f"</summary>{check_html(r)}</details>" for r in runs[1:])
+        if earlier:
+            body += "<h2>Earlier checks</h2><nav>Show the last " + "".join(
+                f"<a href='/?n={k}'>{k}</a>" for k in (20, 50, 200)) + "</nav><br>" + earlier
+    else:
+        body = "<div class='card'>No checks yet. The bot writes one every few minutes once it is running.</div>"
+    help_box = "<h2>What do these words mean?</h2><div class='card'><dl>" + "".join(
+        f"<dt>{term}</dt><dd>{text}</dd>" for term, text in GLOSSARY) + "</dl></div>"
     return (f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
             f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
-            f"<meta http-equiv='refresh' content='60'><title>Trading bot report</title><style>{CSS}</style></head>"
-            f"<body><main><h1>Trading bot report</h1><nav>{nav}</nav><div class='stats'>{stats}</div>"
-            f"{body}</main></body></html>")
+            f"<meta http-equiv='refresh' content='60'><title>Trading bot</title><style>{CSS}</style></head>"
+            f"<body><main><h1>🤖 Trading bot</h1>{subtitle}<br>{body}{help_box}</main></body></html>")
+
+
+# ---------- server ----------
+
+def load_settings() -> dict:
+    try:
+        return yaml.safe_load(open("config/settings.yaml")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -172,10 +387,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         try:
-            n = min(max(int(parse_qs(url.query).get("n", ["50"])[0]), 1), 500)
+            n = min(max(int(parse_qs(url.query).get("n", ["20"])[0]), 1), 500)
         except ValueError:
-            n = 50
-        body = page(recent_runs(self.log_path, n)).encode()
+            n = 20
+        body = page(recent_runs(self.log_path, n), load_settings()).encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         # Defense in depth on top of escaping: no scripts, no outside resources.
