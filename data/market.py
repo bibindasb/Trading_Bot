@@ -37,16 +37,10 @@ def fetch_balances(exchange) -> dict:
 
 
 def fetch_all(exchange, settings: dict) -> dict:
+    """Candles and ticker per configured symbol. Balances come from the executor, which knows paper mode."""
     return {
-        "balances": fetch_balances(exchange),
-        "markets": {
-            symbol: {
-                "ohlcv": fetch_ohlcv(exchange, symbol, settings["timeframe"]),
-                "ticker": exchange.fetch_ticker(symbol),
-                "order_book": exchange.fetch_order_book(symbol, limit=20),
-            }
-            for symbol in settings["symbols"]
-        },
+        symbol: {"ohlcv": fetch_ohlcv(exchange, symbol, settings["timeframe"]), "ticker": exchange.fetch_ticker(symbol)}
+        for symbol in settings["symbols"]
     }
 
 
@@ -56,7 +50,7 @@ if __name__ == "__main__":  # manual check: .venv/bin/python -m data.market
 
     load_dotenv()
     settings = yaml.safe_load(open("config/settings.yaml"))
-    snapshot = fetch_all(make_exchange(settings), settings)
-    print("balances:", snapshot["balances"])
-    for symbol, market in snapshot["markets"].items():
+    exchange = make_exchange(settings)
+    for symbol, market in fetch_all(exchange, settings).items():
         print(symbol, "last:", market["ticker"]["last"], "candles:", len(market["ohlcv"]))
+    print("balances:", fetch_balances(exchange))

@@ -16,7 +16,6 @@ def fake_exchange(now_ms=10 * M15 + 1):
     ex.fetch_ohlcv.return_value = [[i * M15, 1.0, 2.0, 0.5, 1.5, 10.0] for i in (7, 8, 9, 10)]
     ex.fetch_balance.return_value = {"total": {"USDT": 1000.0, "BTC": 0.0, "ETH": 0.5}}
     ex.fetch_ticker.return_value = {"last": 1.5}
-    ex.fetch_order_book.return_value = {"bids": [[1.4, 1]], "asks": [[1.6, 1]]}
     return ex
 
 
@@ -57,6 +56,6 @@ def test_balances_skip_zero():
 
 def test_fetch_all_covers_every_configured_symbol():
     snapshot = market.fetch_all(fake_exchange(), SETTINGS)
-    assert set(snapshot["markets"]) == set(SETTINGS["symbols"])
-    assert snapshot["markets"]["ETH/USDT"]["ticker"]["last"] == 1.5
-    assert snapshot["balances"]["USDT"] == 1000.0
+    assert set(snapshot) == set(SETTINGS["symbols"])
+    assert snapshot["ETH/USDT"]["ticker"]["last"] == 1.5
+    assert len(snapshot["BTC/USDT"]["ohlcv"]) == 3

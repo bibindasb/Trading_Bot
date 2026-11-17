@@ -47,7 +47,7 @@ def test_indicators_with_short_history_give_none_not_errors(n):
 
 def test_market_agent_uses_fast_model_and_sends_indicators():
     client = FakeClient(MARKET)
-    assert market_agent.analyze(client, "BTC/USDT", "15m", candles(100)) is MARKET
+    assert market_agent.analyze(client, "BTC/USDT", "15m", market_agent.indicators(candles(100))) is MARKET
     call = client.calls[0]
     assert call["tier"] == "fast" and call["schema"] is MarketReport
     assert "BTC/USDT" in call["system"] and json.loads(call["user"])["close"] == 199.0

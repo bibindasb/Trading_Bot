@@ -45,6 +45,14 @@ class RiskGuard:
         except Exception as e:
             return [f"risk guard error: {e!r}"]
 
+    def levels(self) -> dict:
+        """Peak and start-of-day equity the limits are measured from; empty if the state can't be read."""
+        try:
+            state = self._load()
+        except Exception:
+            return {}
+        return {k: state.get(k) for k in ("peak_equity", "day_start_equity")}
+
     def violations(self, order, equity: float, positions: dict[str, float], prices: dict[str, float],
                    now: float | None = None) -> list[str]:
         """Why this order is rejected; an empty list means approved.

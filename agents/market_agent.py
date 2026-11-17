@@ -44,7 +44,6 @@ def indicators(ohlcv: pd.DataFrame) -> dict:
     }
 
 
-def analyze(client, symbol: str, timeframe: str, ohlcv: pd.DataFrame) -> MarketReport | None:
-    """None means the model gave no valid report, which makes the run HOLD."""
-    return client.ask("fast", SYSTEM.format(symbol=symbol, timeframe=timeframe),
-                      json.dumps(indicators(ohlcv)), MarketReport)
+def analyze(client, symbol: str, timeframe: str, values: dict) -> MarketReport | None:
+    """values: output of indicators(). None means the model gave no valid report, which makes the run HOLD."""
+    return client.ask("fast", SYSTEM.format(symbol=symbol, timeframe=timeframe), json.dumps(values), MarketReport)
