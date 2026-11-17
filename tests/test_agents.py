@@ -171,3 +171,10 @@ def test_sell_is_a_fraction_of_the_amount_held():
 
 def test_hold_gives_no_order():
     assert to_order(decision_agent.hold("quiet")) is None
+
+
+def test_buy_size_respects_the_fixed_dollar_cap():
+    order = decision_agent.to_order(BUY, ADVICE, 10_000.0, {}, {"BTC/USDT": 50_000.0}, 0.02, max_order_usdt=10)
+    assert order["amount"] == pytest.approx(0.5 * 10 / 50_000)  # half (risk advice) of the $10 cap
+    small = decision_agent.to_order(BUY, ADVICE, 100.0, {}, {"BTC/USDT": 50_000.0}, 0.02, max_order_usdt=10)
+    assert small["amount"] == pytest.approx(0.5 * 2 / 50_000)  # 2% of $100 is below the cap

@@ -20,6 +20,9 @@ class FakeMarket:
     def milliseconds(self):
         return self.now
 
+    def market(self, symbol):
+        return {"limits": {"cost": {"min": 5.0}}}  # Binance's minimum order value for USDT pairs
+
     def parse_timeframe(self, timeframe):
         return {"1m": 60, "15m": 900}[timeframe]
 

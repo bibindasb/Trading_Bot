@@ -11,9 +11,17 @@ from pathlib import Path
 import ccxt
 
 
+def min_order_value(exchange, symbol: str) -> float:
+    """The smallest order value the exchange accepts (Binance: 5 USDT); 0 when it publishes none."""
+    try:
+        return float(exchange.market(symbol)["limits"]["cost"]["min"] or 0)
+    except Exception:
+        return 0.0
+
+
 class PaperExchange:
     def __init__(self, market, settings: dict, state_path: str | Path = "state/paper.json"):
-        self.market = market  # real ccxt exchange, used only for prices and market rules
+        self.data = market  # real ccxt exchange, used only for prices and market rules
         self.fee = settings["paper"]["fee_pct"]
         self.path = Path(state_path)
         quote = settings["symbols"][0].split("/")[1]
@@ -21,10 +29,13 @@ class PaperExchange:
             "total": {quote: float(settings["paper"]["starting_cash"])}, "orders": []}
 
     def load_markets(self):
-        return self.market.load_markets()
+        return self.data.load_markets()
 
     def amount_to_precision(self, symbol, amount):
-        return self.market.amount_to_precision(symbol, amount)
+        return self.data.amount_to_precision(symbol, amount)
+
+    def market(self, symbol):
+        return self.data.market(symbol)
 
     def fetch_balance(self):
         self._trigger_stops()
@@ -42,14 +53,20 @@ class PaperExchange:
         order = {"id": uuid.uuid4().hex, "clientOrderId": params.get("clientOrderId"), "symbol": symbol,
                  "type": type, "side": side, "amount": amount, "filled": 0.0, "remaining": amount,
                  "status": "open", "triggerPrice": params.get("stopLossPrice"),
-                 "timestamp": self.market.milliseconds()}
+                 "timestamp": self.data.milliseconds()}
         if side == "sell" and amount > (self.fetch_balance()["free"].get(symbol.split("/")[0]) or 0.0):
             raise ccxt.InsufficientFunds(f"paper: not enough free {symbol} to sell {amount}")
+        minimum = min_order_value(self.data, symbol)
         if order["triggerPrice"] is None:
-            ticker = self.market.fetch_ticker(symbol)
-            self._fill(order, ticker["ask" if side == "buy" else "bid"] or ticker["last"])
+            ticker = self.data.fetch_ticker(symbol)
+            price = ticker["ask" if side == "buy" else "bid"] or ticker["last"]
+            if amount * price < minimum:  # like Binance, which rejects small orders
+                raise ccxt.InvalidOrder(f"paper: order value {amount * price:.2f} below the minimum {minimum}")
+            self._fill(order, price)
         elif side != "sell":
             raise ccxt.InvalidOrder("paper exchange only supports sell stop losses")
+        elif amount * order["triggerPrice"] < minimum:
+            raise ccxt.InvalidOrder(f"paper: stop order value {amount * order['triggerPrice']:.2f} below the minimum {minimum}")
         self.state["orders"].append(order)
         self._save()
         return dict(order)
@@ -87,15 +104,15 @@ class PaperExchange:
             total[base] -= order["amount"]
             total[quote] = (total.get(quote) or 0.0) + cost * (1 - self.fee)
         order.update(filled=order["amount"], remaining=0.0, status="closed", average=price, cost=cost,
-                     lastTradeTimestamp=self.market.milliseconds())
+                     lastTradeTimestamp=self.data.milliseconds())
 
     def _trigger_stops(self):
-        now = self.market.milliseconds()
+        now = self.data.milliseconds()
         for o in self._open():
             # Re-read one candle back so no minute is skipped, but never candles from before the stop existed.
             since = max(o["timestamp"], o.get("checked", o["timestamp"]) - 60_000)
             # shortcut: 1000 one-minute candles cover ~16h offline; a longer outage misses older wicks.
-            for c in self.market.fetch_ohlcv(o["symbol"], "1m", since=since, limit=1000):
+            for c in self.data.fetch_ohlcv(o["symbol"], "1m", since=since, limit=1000):
                 if c[3] <= o["triggerPrice"]:
                     self._fill(o, min(o["triggerPrice"], c[1]))  # a gap down fills at the open, below the stop
                     break

@@ -99,3 +99,12 @@ def test_fetch_and_cancel_orders(paper, market):
     assert paper.fetch_balance()["free"]["BTC"] == 0.004
     with pytest.raises(ccxt.OrderNotFound):
         paper.cancel_order(stop["id"])
+
+
+def test_paper_rejects_orders_below_the_exchange_minimum(paper):
+    with pytest.raises(ccxt.InvalidOrder):
+        paper.create_order("BTC/USDT", "market", "buy", 0.00008)  # about $4
+    paper.create_order("BTC/USDT", "market", "buy", 0.004)
+    with pytest.raises(ccxt.InvalidOrder):
+        paper.create_order("BTC/USDT", "market", "sell", 0.00009, None, {"stopLossPrice": 49_000.0})  # $4.41 stop
+    assert paper.fetch_open_orders() == []

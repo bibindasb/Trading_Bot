@@ -325,11 +325,42 @@ GLOSSARY = [
     ("Risk check", "How big the next buy may be. It goes down when prices swing a lot or the account is losing."),
     ("Stop loss (safety exit)", "An automatic sell if the price drops to a set level, so one bad trade cannot lose "
                                 "too much."),
-    ("Safety rules", "Fixed limits no AI can override: at most 2% of the account per trade, 20% in coins in total, "
-                     "a pause after a 3% loss in one day, and a full stop after a 10% drop from the best value "
-                     "(with default settings)."),
+    ("Safety rules", "Fixed limits no AI can override, listed under \"Your money rules\". Any trade that breaks one "
+                     "is blocked before it reaches the exchange."),
+    ("Exchange minimum", "Binance only accepts orders worth at least about $5, and the stop loss is its own order, "
+                         "so it must be worth $5 too. Smaller trades are blocked."),
     ("Paused", "The bot stopped trading because a safety limit was hit or someone turned on the kill switch."),
 ]
+
+
+def rules_html(settings: dict, equity: float | None) -> str:
+    """The money limits from settings, in dollars for the current account value."""
+    risk = settings.get("risk") or {}
+    if not risk or not equity:
+        return ""
+    per_trade = equity * risk["max_position_pct"]
+    cap = risk.get("max_order_usdt")
+    if cap is not None:
+        per_trade = min(per_trade, cap)
+    rows = [
+        ("Biggest single trade", usd(per_trade),
+         f"{risk['max_position_pct']:.0%} of the account" + (f", never more than {usd(cap)}" if cap is not None else "")),
+        ("Most money in coins at once", usd(equity * risk["max_total_exposure_pct"]),
+         f"{risk['max_total_exposure_pct']:.0%} of the account"),
+        ("Pause for the day after losing", usd(equity * risk["max_daily_loss_pct"]),
+         f"{risk['max_daily_loss_pct']:.0%} in one day (UTC)"),
+        ("Full stop after falling", usd(equity * risk["max_drawdown_pct"]),
+         f"{risk['max_drawdown_pct']:.0%} below the best value; you restart it by hand"),
+        ("Trades per hour, at most", e(risk.get("max_orders_per_hour")), "a brake on runaway trading"),
+    ]
+    warning = ""
+    if per_trade < 5:
+        warning = ("<div class='alert'>⚠️ The biggest trade allowed is under $5, Binance's minimum order, so the bot "
+                   "cannot trade. Raise the account size or the per-trade limit in config/settings.yaml.</div>")
+    cards = "".join(f"<div class='card'><div class='label'>{label}</div><div class='big'>{value}</div>"
+                    f"<div class='small'>{e(note)}</div></div>" for label, value, note in rows)
+    return (f"<h2>Your money rules</h2>{warning}<div class='grid'>{cards}</div>"
+            "<p class='small'>Set in config/settings.yaml. Change them there and restart the bot.</p>")
 
 
 def mode_of(settings: dict) -> str | None:
@@ -356,6 +387,7 @@ def page(runs: list[dict], settings: dict | None = None, now: datetime | None = 
                       for s, m in (r.get("market") or {}).items() if m)
             + (f"<span class='small'>{outcome(r)}</span>" if outcome(r) else "")
             + f"</summary>{check_html(r)}</details>" for r in runs[1:])
+        body += rules_html(settings, (runs[0].get("account") or {}).get("equity"))
         if earlier:
             body += "<h2>Earlier checks</h2><nav>Show the last " + "".join(
                 f"<a href='/?n={k}'>{k}</a>" for k in (20, 50, 200)) + "</nav><br>" + earlier

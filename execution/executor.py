@@ -9,7 +9,7 @@ import uuid
 import ccxt
 
 from data.market import is_live
-from execution.paper import PaperExchange
+from execution.paper import PaperExchange, min_order_value
 from risk.risk_guard import Order, RiskGuard
 
 RETRIES = 3
@@ -45,8 +45,10 @@ class Executor:
             order = Order.model_validate(order)
             # The guard checks the amount actually sent, after rounding to the exchange's precision.
             sized = {**order.model_dump(), "amount": self._tradeable(order.symbol, order.amount)}
-            equity, positions = self.account(prices)
-            reasons = self.guard.violations(sized, equity, positions, prices)
+            reasons = self._below_minimum(order, sized["amount"], prices)
+            if not reasons:
+                equity, positions = self.account(prices)
+                reasons = self.guard.violations(sized, equity, positions, prices)
         except Exception as e:
             reasons = [f"executor error before placing: {e!r}"]
         if reasons:
@@ -86,6 +88,16 @@ class Executor:
             if self._tradeable(symbol, free):
                 issues.append(f"{symbol}: {free} held with no stop loss")
         return issues
+
+    def _below_minimum(self, order: Order, amount: float, prices: dict) -> list[str]:
+        """The exchange rejects orders under a minimum value. A buy's stop loss is its own order, so it must
+        clear the minimum too, or the position would be left without one."""
+        minimum = min_order_value(self.exchange, order.symbol)
+        values = {"order": amount * prices[order.symbol]}
+        if order.side == "buy" and order.stop_loss:
+            values["stop loss"] = amount * order.stop_loss
+        return [f"{what} value {value:.2f} is below the exchange minimum of {minimum}"
+                for what, value in values.items() if value < minimum]
 
     def _protect(self, symbol: str, stop: float | None) -> list[str]:
         """Put a stop on every coin of symbol not already under one; return problems."""

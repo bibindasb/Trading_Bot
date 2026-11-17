@@ -126,3 +126,23 @@ def test_server_has_no_other_paths(server):
     with pytest.raises(urllib.error.HTTPError) as err:
         urllib.request.urlopen(server + "/../state/risk_state.json")
     assert err.value.code == 404
+
+
+RISK = {"max_position_pct": 0.02, "max_order_usdt": None, "max_total_exposure_pct": 0.2, "max_daily_loss_pct": 0.03,
+        "max_drawdown_pct": 0.1, "max_orders_per_hour": 4}
+
+
+def test_money_rules_in_dollars():
+    html = web.page([{**TRADE_RUN, "account": {"equity": 10_000.0}}], {**SETTINGS, "risk": RISK}, NOW)
+    assert "Your money rules" in html
+    for text in ["$200.00", "2% of the account", "$2,000.00", "$300.00", "$1,000.00"]:
+        assert text in html, text
+    assert "cannot trade" not in html
+
+
+def test_fixed_cap_and_too_small_account_are_explained():
+    capped = web.page([{**TRADE_RUN, "account": {"equity": 10_000.0}}],
+                      {**SETTINGS, "risk": {**RISK, "max_order_usdt": 10}}, NOW)
+    assert "$10.00" in capped and "never more than $10.00" in capped
+    tiny = web.page([{**TRADE_RUN, "account": {"equity": 10.0}}], {**SETTINGS, "risk": RISK}, NOW)
+    assert "cannot trade" in tiny  # 2% of $10 is $0.20, under Binance's $5 minimum

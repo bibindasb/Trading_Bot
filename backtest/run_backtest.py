@@ -53,6 +53,9 @@ class HistoricalMarket:
     def amount_to_precision(self, symbol, amount):
         return self.source.amount_to_precision(symbol, amount)
 
+    def market(self, symbol):
+        return self.source.market(symbol)
+
     def fetch_ohlcv(self, symbol, timeframe, since=None, limit=None):
         # Serves the backtest timeframe whatever is asked; paper stop checks ask for 1m but only need the lows.
         times = self.times[symbol]

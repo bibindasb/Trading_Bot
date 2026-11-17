@@ -120,6 +120,9 @@ class RiskGuard:
         notional = order.amount * price
         if notional > equity * self.limits["max_position_pct"]:
             reasons.append(f"position size {notional:.2f} over {self.limits['max_position_pct']:.0%} of equity")
+        cap = self.limits.get("max_order_usdt")
+        if cap is not None and notional > cap:
+            reasons.append(f"order value {notional:.2f} over the fixed cap of {cap} per trade")
         exposure = sum(amount * prices[s] for s, amount in positions.items() if amount)
         if exposure + notional > equity * self.limits["max_total_exposure_pct"]:
             reasons.append(f"total exposure {exposure + notional:.2f} over "

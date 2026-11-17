@@ -184,3 +184,20 @@ def test_no_module_outside_execution_calls_the_order_api():
                  if p.relative_to(ROOT).parts[0] not in ("execution", "tests", ".venv")
                  and order_api.search(p.read_text())]
     assert offenders == []
+
+
+def test_order_below_exchange_minimum_is_rejected_before_anything_is_sent(ex, paper):
+    result = ex.submit(buy(amount=0.00008), PRICES)  # $4
+    assert result["status"] == "rejected" and "order value 4.00 is below the exchange minimum of 5.0" in result["reasons"]
+    assert paper.state["orders"] == []
+
+
+def test_buy_whose_stop_loss_would_be_too_small_is_rejected(ex, paper):
+    result = ex.submit(buy(amount=0.0001, stop=45_000.0), PRICES)  # $5 buy, but its stop is a $4.50 order
+    assert any("stop loss value 4.50" in r for r in result["reasons"]) and paper.state["orders"] == []
+
+
+def test_sell_below_exchange_minimum_is_rejected(ex, paper):
+    ex.submit(buy(), PRICES)
+    result = ex.submit({"symbol": "BTC/USDT", "side": "sell", "amount": 0.00005}, PRICES)  # $2.50
+    assert result["status"] == "rejected" and "below the exchange minimum" in result["reasons"][0]

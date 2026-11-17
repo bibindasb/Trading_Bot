@@ -12,6 +12,7 @@ backtest:
 
 risk:
   max_position_pct: 0.02
+  max_order_usdt: null           # fixed cap per trade in USDT, e.g. 10; null = only the % limit above
   max_total_exposure_pct: 0.20
   max_daily_loss_pct: 0.03
   max_drawdown_pct: 0.10

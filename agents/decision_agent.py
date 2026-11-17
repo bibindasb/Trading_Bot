@@ -34,7 +34,7 @@ def decide(client, market: dict[str, MarketReport | None], sentiment: dict[str, 
 
 
 def to_order(decision: Decision, advice: RiskAdvice, equity: float, positions: dict[str, float],
-             prices: dict[str, float], max_position_pct: float) -> dict | None:
+             prices: dict[str, float], max_position_pct: float, max_order_usdt: float | None = None) -> dict | None:
     """Turn a decision into an order for the executor, which still runs it past the risk guard.
 
     positions: symbol -> base amount held. None means no trade.
@@ -48,5 +48,6 @@ def to_order(decision: Decision, advice: RiskAdvice, equity: float, positions: d
     size = min(decision.size, advice.max_size)  # the risk advisor can only shrink a buy
     if not price or size <= 0:
         return None
-    return {"symbol": decision.symbol, "side": "buy", "amount": size * max_position_pct * equity / price,
+    budget = max_position_pct * equity if max_order_usdt is None else min(max_position_pct * equity, max_order_usdt)
+    return {"symbol": decision.symbol, "side": "buy", "amount": size * budget / price,
             "stop_loss": decision.stop_loss, "take_profit": decision.take_profit}

@@ -206,3 +206,16 @@ def test_manual_kill_file_stops_everything(guard, tmp_path):
 def test_empty_kill_file_counts(guard, tmp_path):
     (tmp_path / "KILL").touch()
     assert rejected(check(guard, buy()), "kill switch on: manual")
+
+
+# --- fixed dollar cap per trade ---
+
+def test_fixed_cap_rejects_buys_above_it(tmp_path):
+    guard = make_guard(tmp_path, max_order_usdt=10)
+    assert check(guard, buy(amount=0.0002)) == []  # $10, exactly the cap
+    assert rejected(check(guard, buy(amount=0.00021)), "fixed cap of 10")  # $10.50
+
+
+def test_fixed_cap_does_not_block_sells(tmp_path):
+    guard = make_guard(tmp_path, max_order_usdt=10)
+    assert check(guard, sell(0.01), positions={"BTC/USDT": 0.01}) == []  # $500 sell

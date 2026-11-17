@@ -103,7 +103,7 @@ def build_graph(settings: dict, market, executor, client, checkpointer=None, new
         decision = decision_agent.decide(client, market_reports, sentiment, advice, state["account"])
         acct = state["account"]
         order = decision_agent.to_order(decision, advice, acct["equity"], acct["positions"], state["prices"],
-                                        settings["risk"]["max_position_pct"])
+                                        settings["risk"]["max_position_pct"], settings["risk"].get("max_order_usdt"))
         return {"decision": decision.model_dump(), "order": order}
 
     def execute(state):
