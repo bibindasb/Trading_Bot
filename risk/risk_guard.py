@@ -23,6 +23,13 @@ class Order(BaseModel):
     take_profit: Positive | None = None
 
 
+def max_buy_value(equity: float, limits: dict) -> float:
+    """The largest buy the limits allow: a share of equity, capped at a fixed amount when one is set."""
+    value = equity * limits["max_position_pct"]
+    cap = limits.get("max_order_usdt")
+    return value if cap is None else min(value, cap)
+
+
 def _require(ok: bool, message: str) -> None:
     if not ok:
         raise ValueError(message)

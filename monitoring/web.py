@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 import yaml
 
 from data.market import mode
+from risk.risk_guard import max_buy_value
 
 RUN_MARK = '"msg": "run: '
 CSS = """
@@ -338,10 +339,7 @@ def rules_html(settings: dict, equity: float | None) -> str:
     risk = settings.get("risk") or {}
     if not risk or not equity:
         return ""
-    per_trade = equity * risk["max_position_pct"]
-    cap = risk.get("max_order_usdt")
-    if cap is not None:
-        per_trade = min(per_trade, cap)
+    per_trade, cap = max_buy_value(equity, risk), risk.get("max_order_usdt")
     rows = [
         ("Biggest single trade", usd(per_trade),
          f"{risk['max_position_pct']:.0%} of the account" + (f", never more than {usd(cap)}" if cap is not None else "")),

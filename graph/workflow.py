@@ -21,6 +21,8 @@ from agents import decision_agent, market_agent, risk_agent, sentiment_agent
 from agents.schemas import MarketReport, RiskAdvice, SentimentReport
 from data.market import fetch_all
 from data.news import fetch_headlines
+from execution.paper import min_order_value
+from risk.risk_guard import max_buy_value
 
 log = logging.getLogger(__name__)
 KEEP_DAYS = 14  # checkpoints of older runs are deleted
@@ -45,6 +47,26 @@ def _dump(report):
     return report.model_dump() if report else None
 
 
+def account_snapshot(settings: dict, equity: float, positions: dict, prices: dict, levels: dict,
+                     volatility: dict, min_order: float) -> dict:
+    """What the risk and decision agents know about the account. Plain numbers computed by code."""
+    values = {s: a * prices[s] for s, a in positions.items()}
+    return {
+        "equity": equity,
+        "positions": positions,
+        "position_values": values,
+        "exposure_pct": sum(values.values()) / equity if equity else None,
+        "drawdown_pct": 1 - equity / levels["peak_equity"] if levels.get("peak_equity") else None,
+        "daily_pnl_pct": equity / levels["day_start_equity"] - 1 if levels.get("day_start_equity") else None,
+        "volatility_atr_pct": volatility,
+        "prices": prices,
+        "allowlist": settings["symbols"],
+        "buy_budget_usdt": max_buy_value(equity, settings["risk"]),  # what size 1.0 buys
+        "min_order_usdt": min_order,  # the exchange rejects smaller orders, stop losses included
+        "limits": {k: v for k, v in settings["risk"].items() if k != "kill_switch_file"},
+    }
+
+
 def make_checkpointer(path: str | Path = "state/checkpoints.sqlite") -> SqliteSaver:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     # The parallel agent nodes run in threads; SqliteSaver serializes access with its own lock.
@@ -66,20 +88,9 @@ def build_graph(settings: dict, market, executor, client, checkpointer=None, new
         prices = state["prices"]
         equity, positions = executor.account(prices)
         halts = guard.halts(equity)  # records equity for the drawdown and daily-loss limits, even on HOLD
-        levels = guard.levels()
-        values = {s: a * prices[s] for s, a in positions.items()}
-        acct = {
-            "equity": equity,
-            "positions": positions,
-            "position_values": values,
-            "exposure_pct": sum(values.values()) / equity if equity else None,
-            "drawdown_pct": 1 - equity / levels["peak_equity"] if levels.get("peak_equity") else None,
-            "daily_pnl_pct": equity / levels["day_start_equity"] - 1 if levels.get("day_start_equity") else None,
-            "volatility_atr_pct": {s: state["indicators"][s]["atr_pct"] for s in symbols},
-            "prices": prices,
-            "allowlist": symbols,
-            "limits": {k: v for k, v in settings["risk"].items() if k != "kill_switch_file"},
-        }
+        acct = account_snapshot(settings, equity, positions, prices, guard.levels(),
+                                {s: state["indicators"][s]["atr_pct"] for s in symbols},
+                                max(min_order_value(executor.exchange, s) for s in symbols))
         return {"account": acct, "halts": halts, "issues": executor.reconcile()}
 
     def route(state):
@@ -102,8 +113,7 @@ def build_graph(settings: dict, market, executor, client, checkpointer=None, new
         advice = RiskAdvice.model_validate(state["advice"]) if state["advice"] else None
         decision = decision_agent.decide(client, market_reports, sentiment, advice, state["account"])
         acct = state["account"]
-        order = decision_agent.to_order(decision, advice, acct["equity"], acct["positions"], state["prices"],
-                                        settings["risk"]["max_position_pct"], settings["risk"].get("max_order_usdt"))
+        order = decision_agent.to_order(decision, advice, acct["positions"], state["prices"], acct["buy_budget_usdt"])
         return {"decision": decision.model_dump(), "order": order}
 
     def execute(state):

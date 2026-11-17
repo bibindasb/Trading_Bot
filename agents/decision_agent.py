@@ -5,8 +5,10 @@ from agents.schemas import Decision, MarketReport, RiskAdvice, SentimentReport
 
 SYSTEM = ("You are the decision agent of a spot crypto trading bot. Combine the market, sentiment and risk "
           "reports into one decision for one symbol from the allowlist.\n"
-          "- BUY: size is the fraction from 0 to 1 of the maximum position size. stop_loss is required and must "
-          "be below the current price. take_profit is optional.\n"
+          "- BUY: size is the fraction from 0 to 1 of the maximum position size, so the buy is worth size x "
+          "buy_budget_usdt. That value, and the stop loss order (amount x stop_loss), must each be at least "
+          "min_order_usdt or the exchange rejects them, so choose a large enough size or HOLD. stop_loss is "
+          "required and must be below the current price. take_profit is optional.\n"
           "- SELL: only a symbol that is held. size is the fraction from 0 to 1 of the amount held.\n"
           "- HOLD when signals are weak, conflicting or unclear. Every trade pays fees, so trade only with a "
           "clear edge.\n"
@@ -33,11 +35,11 @@ def decide(client, market: dict[str, MarketReport | None], sentiment: dict[str, 
     return client.ask("reasoning", SYSTEM, user, Decision) or hold("invalid decision output")
 
 
-def to_order(decision: Decision, advice: RiskAdvice, equity: float, positions: dict[str, float],
-             prices: dict[str, float], max_position_pct: float, max_order_usdt: float | None = None) -> dict | None:
+def to_order(decision: Decision, advice: RiskAdvice, positions: dict[str, float], prices: dict[str, float],
+             budget: float) -> dict | None:
     """Turn a decision into an order for the executor, which still runs it past the risk guard.
 
-    positions: symbol -> base amount held. None means no trade.
+    positions: symbol -> base amount held. budget: the largest buy allowed, in USDT. None means no trade.
     """
     if decision.action == "HOLD":
         return None
@@ -48,6 +50,5 @@ def to_order(decision: Decision, advice: RiskAdvice, equity: float, positions: d
     size = min(decision.size, advice.max_size)  # the risk advisor can only shrink a buy
     if not price or size <= 0:
         return None
-    budget = max_position_pct * equity if max_order_usdt is None else min(max_position_pct * equity, max_order_usdt)
     return {"symbol": decision.symbol, "side": "buy", "amount": size * budget / price,
             "stop_loss": decision.stop_loss, "take_profit": decision.take_profit}

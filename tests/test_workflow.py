@@ -85,6 +85,7 @@ def test_second_run_sees_the_position(env):
     assert acct["exposure_pct"] == pytest.approx(100 / acct["equity"])
     assert acct["drawdown_pct"] == pytest.approx(1 - acct["equity"] / 10_000)
     assert "kill_switch_file" not in acct["limits"]
+    assert acct["buy_budget_usdt"] == pytest.approx(0.02 * acct["equity"]) and acct["min_order_usdt"] == 5.0
     assert state["result"] is None and state["issues"] == []
 
 

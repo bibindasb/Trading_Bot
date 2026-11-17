@@ -147,7 +147,7 @@ def test_hold_needs_nothing_else():
 # --- decision to order ---
 
 def to_order(decision, advice=ADVICE, positions=None):
-    return decision_agent.to_order(decision, advice, 10_000.0, positions or {}, {"BTC/USDT": 50_000.0}, 0.02)
+    return decision_agent.to_order(decision, advice, positions or {}, {"BTC/USDT": 50_000.0}, 200.0)  # 2% of 10k
 
 
 def test_buy_size_is_capped_by_risk_advice():
@@ -173,8 +173,11 @@ def test_hold_gives_no_order():
     assert to_order(decision_agent.hold("quiet")) is None
 
 
-def test_buy_size_respects_the_fixed_dollar_cap():
-    order = decision_agent.to_order(BUY, ADVICE, 10_000.0, {}, {"BTC/USDT": 50_000.0}, 0.02, max_order_usdt=10)
-    assert order["amount"] == pytest.approx(0.5 * 10 / 50_000)  # half (risk advice) of the $10 cap
-    small = decision_agent.to_order(BUY, ADVICE, 100.0, {}, {"BTC/USDT": 50_000.0}, 0.02, max_order_usdt=10)
-    assert small["amount"] == pytest.approx(0.5 * 2 / 50_000)  # 2% of $100 is below the cap
+def test_buy_budget_is_a_share_of_equity_capped_at_a_fixed_amount():
+    from risk.risk_guard import max_buy_value
+
+    assert max_buy_value(10_000.0, {"max_position_pct": 0.02}) == 200.0
+    assert max_buy_value(10_000.0, {"max_position_pct": 0.02, "max_order_usdt": 10}) == 10
+    assert max_buy_value(100.0, {"max_position_pct": 0.02, "max_order_usdt": 10}) == 2.0  # the share is smaller
+    order = decision_agent.to_order(BUY, ADVICE, {}, {"BTC/USDT": 50_000.0}, 10.0)
+    assert order["amount"] == pytest.approx(0.5 * 10 / 50_000)  # half (risk advice) of a $10 budget
