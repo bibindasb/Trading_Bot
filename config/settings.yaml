@@ -17,13 +17,18 @@ risk:
   kill_switch_file: state/KILL   # create this file to stop all trading; delete it to resume
 
 llm:
-  providers:                     # first is primary, second is the fallback
+  timeout_seconds: 60            # per request
+  max_retries: 2                 # per provider, on timeouts, rate limits and server errors
+  providers:                     # tried in order; the next one is the fallback
     - name: openrouter
       base_url: https://openrouter.ai/api/v1
       api_key_env: OPENROUTER_API_KEY
+      models:                    # provider/model IDs; a blank model skips this provider for that tier
+        fast: ""                 # market and sentiment agents
+        reasoning: ""            # decision agent
     - name: fastrouter
-      base_url: ""               # fill in from FastRouter's docs
+      base_url: https://api.fastrouter.ai/api/v1
       api_key_env: FASTROUTER_API_KEY
-  models:
-    fast: ""                     # market and sentiment agents
-    reasoning: ""                # decision agent
+      models:
+        fast: ""
+        reasoning: ""
