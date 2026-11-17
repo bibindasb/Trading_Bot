@@ -93,12 +93,31 @@ def test_sell_with_nothing_held_places_nothing(env):
     assert state["order"] is None and state["result"] is None
 
 
-def test_data_failure_stops_the_run(env, monkeypatch):
+class FakeAlerter:
+    def __init__(self):
+        self.finished, self.failed = [], []
+
+    def run_finished(self, state):
+        self.finished.append(state)
+
+    def run_failed(self, error):
+        self.failed.append(error)
+
+
+def test_data_failure_stops_the_run_and_alerts(env, monkeypatch):
     monkeypatch.setattr(env[1], "fetch_ticker", lambda s: (_ for _ in ()).throw(RuntimeError("exchange down")))
-    client = SchemaClient(ALL)
+    client, alerter = SchemaClient(ALL), FakeAlerter()
+    settings, market, executor, _, _ = env
     with pytest.raises(RuntimeError, match="exchange down"):
-        run(env, client)
-    assert client.calls == []
+        workflow.run_once(workflow.build_graph(settings, market, executor, client), alerter)
+    assert client.calls == [] and str(alerter.failed[0]) == "exchange down" and alerter.finished == []
+
+
+def test_finished_run_goes_to_the_alerter(env):
+    settings, market, executor, _, _ = env
+    alerter = FakeAlerter()
+    workflow.run_once(workflow.build_graph(settings, market, executor, SchemaClient(ALL)), alerter)
+    assert alerter.finished[0]["result"]["status"] == "filled" and alerter.failed == []
 
 
 def test_runs_are_checkpointed_and_old_runs_deleted(env):

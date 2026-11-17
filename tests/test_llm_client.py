@@ -82,6 +82,16 @@ def test_bad_primary_falls_back_to_backup(calls, bad):
     assert calls[1]["api_key"] == "k2"
 
 
+def test_every_call_logs_its_input_and_output(calls, caplog):
+    caplog.set_level("INFO")
+    calls.replies.update({"https://primary.test/v1": "garbage", "https://backup.test/v1": '{"score": 0.3}'})
+    ask()
+    records = [r.data for r in caplog.records if hasattr(r, "data")]
+    assert records[0]["provider"] == "primary" and records[0]["reply"] == "garbage" and "error" in records[0]
+    assert records[1]["provider"] == "backup" and records[1]["output"] == {"score": 0.3}
+    assert all(r["user"] == "BTC up" and "Score the news." in r["system"] for r in records)
+
+
 def test_all_providers_failing_returns_none(calls):
     calls.replies.update({"https://primary.test/v1": "nope", "https://backup.test/v1": RuntimeError("down")})
     assert ask() is None
@@ -108,7 +118,8 @@ def test_unconfigured_provider_is_skipped(calls, monkeypatch, missing):
     assert [c["model"] for c in calls] == ["b/fast"]
 
 
-def test_nothing_configured_returns_none(calls, monkeypatch):
+def test_nothing_configured_returns_none_and_says_why(calls, monkeypatch, caplog):
     monkeypatch.delenv("PRIMARY_KEY")
     monkeypatch.delenv("BACKUP_KEY")
     assert ask() is None and calls == []
+    assert "no provider" in caplog.records[-1].getMessage()

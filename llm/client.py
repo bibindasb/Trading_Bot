@@ -22,18 +22,25 @@ class LLMClient:
         """tier: 'fast' or 'reasoning'. Returns the validated reply, or None if every provider failed."""
         system = (f"{system}\n\nReply with only a JSON object matching this JSON schema:\n"
                   f"{json.dumps(schema.model_json_schema())}")
+        tried = False
         for p in self.cfg["providers"]:
             model, key = p["models"].get(tier), os.getenv(p["api_key_env"])
             if not (p["base_url"] and model and key):
-                log.info("llm: skipping %s for %s, base_url, model or %s not set", p["name"], tier, p["api_key_env"])
                 continue
+            tried = True
+            call = {"tier": tier, "provider": p["name"], "model": model, "schema": schema.__name__,
+                    "system": system, "user": user, "reply": None}
             try:
                 chat = ChatOpenAI(model=model, base_url=p["base_url"], api_key=key,
                                   timeout=self.cfg["timeout_seconds"], max_retries=self.cfg["max_retries"])
-                text = chat.invoke([SystemMessage(system), HumanMessage(user)]).content
+                text = call["reply"] = chat.invoke([SystemMessage(system), HumanMessage(user)]).content
                 text = text if isinstance(text, str) else ""
                 # Models often wrap JSON in code fences or a sentence; keep only the outermost object.
-                return schema.model_validate_json(text[text.find("{"):text.rfind("}") + 1])
+                output = schema.model_validate_json(text[text.find("{"):text.rfind("}") + 1])
+                log.info("llm call", extra={"data": {**call, "output": output.model_dump()}})
+                return output
             except Exception as e:
-                log.warning("llm: %s %s failed: %r", p["name"], model, e)
+                log.warning("llm call failed: %s %s: %r", p["name"], model, e, extra={"data": {**call, "error": repr(e)}})
+        if not tried:
+            log.warning("llm: no provider has a base_url, %s model and API key set", tier)
         return None

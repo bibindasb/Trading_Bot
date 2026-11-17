@@ -109,8 +109,8 @@ def build_graph(settings: dict, market, executor, client, checkpointer=None):
         return {"result": executor.submit(state["order"], state["prices"]) if state.get("order") else None}
 
     def log_run(state):
-        log.info("run: %s", json.dumps({k: state.get(k) for k in
-                                         ("halts", "issues", "decision", "order", "result")}, default=str))
+        summary = {k: state.get(k) for k in ("halts", "issues", "decision", "order", "result")}
+        log.info("run: %s", json.dumps(summary, default=str), extra={"data": dict(state)})
         return {}
 
     g = StateGraph(RunState)
@@ -127,8 +127,8 @@ def build_graph(settings: dict, market, executor, client, checkpointer=None):
     return g.compile(checkpointer=checkpointer)
 
 
-def run_once(graph) -> dict:
-    """Run the flow once under a new thread id; returns the final state.
+def run_once(graph, alerter=None) -> dict:
+    """Run the flow once under a new thread id; returns the final state. A failed run is alerted, then re-raised.
 
     A run that crashes is not resumed: its prices are stale by the next run, and a resumed execute step could
     repeat an order. Recovery comes from the exchange (executor.reconcile) and the risk guard's own state.
@@ -136,7 +136,15 @@ def run_once(graph) -> dict:
     # Unique per run: reusing a thread id would carry the previous run's state into this one.
     run_id = f"run-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}"
     config = {"configurable": {"thread_id": run_id}}
-    state = graph.invoke({}, config)
+    try:
+        state = graph.invoke({}, config)
+    except Exception as e:
+        log.exception("run %s failed", run_id)
+        if alerter:
+            alerter.run_failed(e)
+        raise
+    if alerter:
+        alerter.run_finished(state)
     if isinstance(graph.checkpointer, SqliteSaver):
         _delete_runs_before(graph.checkpointer, datetime.now(timezone.utc) - timedelta(days=KEEP_DAYS))
     return {"run_id": run_id, **state}
