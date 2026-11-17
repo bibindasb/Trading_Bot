@@ -104,3 +104,53 @@ def test_money_rules_catch_trades_too_small_to_place(tmp_path):
     tiny = {**SETTINGS, "paper": {**SETTINGS["paper"], "starting_cash": 10}, "risk": {**SETTINGS["risk"], "max_position_pct": 0.02}}
     results = list(validate.money_rules(tiny, FakeMarket(), tmp_path))
     assert results[0][2] == FAIL and "under the $5 minimum" in results[0][3]
+
+
+# --- connections ---
+
+class Blocked(FakeMarket):
+    def fetch_ticker(self, symbol):
+        raise RuntimeError("binance GET https://api.binance.com/api/v3/ticker 451 Service unavailable from a "
+                           "restricted location")
+
+
+@pytest.fixture
+def news(monkeypatch):
+    import data.news
+
+    monkeypatch.setattr(data.news, "fetch_headlines", lambda s: {"BTC/USDT": ["Bitcoin rises"], "ETH/USDT": []})
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+
+def test_connections_all_reachable_without_telegram(news):
+    results = list(validate.connections(SETTINGS, FakeMarket()))
+    assert [(r[1], r[2]) for r in results] == [("Binance prices", PASS), ("News feeds", PASS), ("Telegram alerts", WARN)]
+
+
+def test_binance_blocked_region_is_explained(news):
+    result = list(validate.connections(SETTINGS, Blocked()))[0]
+    assert result[2] == FAIL and "country or cloud region" in result[3]
+
+
+def test_no_news_is_a_warning(news, monkeypatch):
+    import data.news
+
+    monkeypatch.setattr(data.news, "fetch_headlines", lambda s: {"BTC/USDT": [], "ETH/USDT": []})
+    assert list(validate.connections(SETTINGS, FakeMarket()))[1][2] == WARN
+
+
+def test_telegram_checked_without_revealing_the_token(news, monkeypatch):
+    import httpx
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:SECRET")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setattr(httpx, "get", lambda url, **kw: httpx.Response(200, request=httpx.Request("GET", url)))
+    assert list(validate.connections(SETTINGS, FakeMarket()))[2][2] == PASS
+
+    def down(url, **kw):
+        raise httpx.ConnectError(f"cannot reach {url}")
+
+    monkeypatch.setattr(httpx, "get", down)
+    result = list(validate.connections(SETTINGS, FakeMarket()))[2]
+    assert result[2] == FAIL and "SECRET" not in result[3] and "***" in result[3]

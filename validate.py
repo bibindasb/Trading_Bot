@@ -1,6 +1,7 @@
-"""Validates the four AI agents with the model set in .env, before the bot trades.
+"""Validates a machine and the four AI agents before the bot trades (run it on every new server).
 
-Every agent gets fixed test situations where the right answer is obvious, a few times over (models vary):
+First it checks the connections the bot needs: Binance prices, the news feeds and Telegram.
+Then every agent gets fixed test situations where the right answer is obvious, a few times over (models vary):
   FAIL  broken or unsafe: no valid answer, a buy without a proper stop loss, buying while the risk advisor
         says pause, calling a clearly falling chart rising, obeying instructions hidden in the news.
   WARN  a judgment call most traders would make differently. Worth a look, not a blocker.
@@ -287,6 +288,43 @@ def live_check(settings: dict, client, source, workdir: Path):
         f" ({time.monotonic() - started:.0f}s)"
 
 
+def short(error: Exception, secret: str | None = None) -> str:
+    text = repr(error)
+    return (text.replace(secret, "***") if secret else text)[:220]
+
+
+def connections(settings: dict, source):
+    """No AI: can this machine reach Binance, the news feeds and Telegram?"""
+    import httpx
+
+    from data.news import fetch_headlines
+
+    group, symbol = "Connections", settings["symbols"][0]
+    try:
+        yield group, "Binance prices", PASS, f"{symbol} {source.fetch_ticker(symbol)['last']:,.2f}"
+    except Exception as e:
+        hint = (" Binance blocks this server's country or cloud region (the US, for example): use a server "
+                "in an allowed region." if "451" in str(e) or "restricted" in str(e).lower() else
+                " Check that this machine can reach api.binance.com.")
+        yield group, "Binance prices", FAIL, short(e) + hint
+
+    found = sum(len(h) for h in fetch_headlines(settings).values())
+    yield group, "News feeds", PASS if found else WARN, \
+        f"{found} recent headlines" if found else "no headlines found, so the news mood stays neutral"
+
+    token, chat = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
+    if not (token and chat):
+        yield group, "Telegram alerts", WARN, "not set up, so alerts only show on the dashboard"
+        return
+    try:
+        r = httpx.get(f"https://api.telegram.org/bot{token}/getChat", params={"chat_id": chat}, timeout=15)
+        ok = r.status_code == 200
+        yield group, "Telegram alerts", PASS if ok else FAIL, \
+            "the bot can reach your chat" if ok else f"HTTP {r.status_code}: check the token and chat ID"
+    except Exception as e:
+        yield group, "Telegram alerts", FAIL, short(e, token)  # the request URL holds the token
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--repeat", type=int, default=2, help="tries per situation (default 2)")
@@ -317,15 +355,21 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         (Path(tmp) / "money").mkdir()
         (Path(tmp) / "live").mkdir()
-        checks = [agent_checks(client, settings, args.repeat), money_rules(settings, source, Path(tmp) / "money"),
-                  live_check(settings, client, source, Path(tmp) / "live")]
-        for results in checks:
-            for grp, name, status, detail in results:
-                if grp != group:
-                    print(f"\n{grp}")
-                    group = grp
-                print(f"  {status}  {name}: {detail}", flush=True)
-                counts[status] += 1
+        checks = [("Connections", connections(settings, source)),
+                  ("AI agents", agent_checks(client, settings, args.repeat)),
+                  ("Money rules", money_rules(settings, source, Path(tmp) / "money")),
+                  ("Full check on live prices", live_check(settings, client, source, Path(tmp) / "live"))]
+        for label, results in checks:
+            try:
+                for grp, name, status, detail in results:
+                    if grp != group:
+                        print(f"\n{grp}")
+                        group = grp
+                    print(f"  {status}  {name}: {detail}", flush=True)
+                    counts[status] += 1
+            except Exception as e:  # e.g. no network: report it and carry on with the next section
+                print(f"  FAIL  {label} could not finish: {short(e)}", flush=True)
+                counts[FAIL] += 1
 
     print(f"\nResult: {counts[PASS]} passed, {counts[WARN]} warnings, {counts[FAIL]} failed.")
     print("Not ready: fix the failures before trading." if counts[FAIL] else
