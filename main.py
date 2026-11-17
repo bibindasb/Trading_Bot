@@ -7,6 +7,7 @@ Modes:
 """
 import logging
 import signal
+import threading
 from datetime import datetime, timezone
 
 import yaml
@@ -20,6 +21,7 @@ from graph.workflow import build_graph, make_checkpointer, run_once
 from llm.client import LLMClient
 from monitoring.alerts import Alerter
 from monitoring.logger import setup_logging
+from monitoring.web import make_server
 
 log = logging.getLogger("main")
 
@@ -46,6 +48,19 @@ def daily_summary(settings: dict, market, executor) -> str:
     halts = executor.guard.halts(equity)
     lines.append("Trading HALTED: " + "; ".join(halts) if halts else "Trading active")
     return "\n".join(lines)
+
+
+def start_report(alerter):
+    """Serve the report page from this process. If it cannot start, trading carries on without it."""
+    try:
+        server = make_server()
+    except OSError as e:
+        log.error("report page not started: %r", e)
+        alerter.send(f"WARNING: report page not started: {e!r}")
+        return None
+    threading.Thread(target=server.serve_forever, daemon=True, name="report").start()
+    log.info("report page on http://%s:%s", *server.server_address[:2])
+    return server
 
 
 def build_scheduler(settings: dict, market, executor, graph, alerter) -> BlockingScheduler:
@@ -89,6 +104,7 @@ def main():
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     log.info("starting in %s mode", mode(settings))
+    start_report(alerter)
     alerter.send(f"Bot started in {mode(settings)} mode, every {settings['run_interval_minutes']} minutes")
     scheduler.start()
     alerter.send("Bot stopped")

@@ -3,7 +3,8 @@
 It reads the run records the bot writes to logs/bot.jsonl, so it needs nothing from the running bot.
 Headlines and model text are untrusted: everything is HTML-escaped and the page runs no scripts.
 
-Run: .venv/bin/python -m monitoring.web, then open http://127.0.0.1:8080
+main.py serves it alongside the bot at http://127.0.0.1:8080 (REPORT_HOST / REPORT_PORT to change).
+Standalone: .venv/bin/python -m monitoring.web
 """
 import html
 import json
@@ -188,10 +189,14 @@ class Handler(BaseHTTPRequestHandler):
         pass  # page views are not worth logging
 
 
-def main():
-    host, port = os.getenv("REPORT_HOST", "127.0.0.1"), int(os.getenv("REPORT_PORT", "8080"))
-    print(f"report page on http://{host}:{port}", flush=True)
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+def make_server() -> ThreadingHTTPServer:
+    return ThreadingHTTPServer((os.getenv("REPORT_HOST", "127.0.0.1"), int(os.getenv("REPORT_PORT", "8080"))), Handler)
+
+
+def main():  # standalone, for reading logs without the bot running
+    server = make_server()
+    print(f"report page on http://{server.server_address[0]}:{server.server_address[1]}", flush=True)
+    server.serve_forever()
 
 
 if __name__ == "__main__":

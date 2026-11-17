@@ -91,6 +91,34 @@ def test_schedule_runs_now_then_on_candle_close_without_overlap(paper_executor):
     assert "hour='23'" in str(summary.trigger) and "minute='55'" in str(summary.trigger)
 
 
+def test_report_page_runs_inside_the_bot(monkeypatch, tmp_path):
+    import urllib.request
+
+    monkeypatch.setenv("REPORT_PORT", "0")  # any free port
+    server = main.start_report(Recorder())
+    try:
+        host, port = server.server_address[:2]
+        with urllib.request.urlopen(f"http://{host}:{port}/") as r:
+            assert r.status == 200 and "Trading bot report" in r.read().decode()
+    finally:
+        server.shutdown()
+
+
+def test_busy_report_port_does_not_stop_the_bot(monkeypatch):
+    import socket
+
+    taken = socket.socket()
+    taken.bind(("127.0.0.1", 0))
+    taken.listen()
+    monkeypatch.setenv("REPORT_PORT", str(taken.getsockname()[1]))
+    alerter = Recorder()
+    try:
+        assert main.start_report(alerter) is None
+        assert alerter.sent[0].startswith("WARNING: report page not started")
+    finally:
+        taken.close()
+
+
 def test_jobs_never_raise(paper_executor, monkeypatch):
     settings, market, executor = paper_executor
     alerter = Recorder()

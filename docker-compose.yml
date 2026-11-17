@@ -1,5 +1,5 @@
 services:
-  bot:
+  bot:                             # the trading agents and the report page, in one container
     image: tr-automation-bot
     build:
       context: .
@@ -12,25 +12,16 @@ services:
     env_file:
       - path: .env
         required: false            # paper mode runs without it, but the agents need LLM keys to trade
+    environment:
+      REPORT_HOST: 0.0.0.0         # inside the container; the port below is published to this machine only
+    ports:
+      - "127.0.0.1:8080:8080"     # report page: http://127.0.0.1:8080, from elsewhere use an SSH tunnel
     volumes:
       - ./config:/app/config:ro    # edit settings.yaml, then: docker compose restart
       - state:/app/state           # risk guard state, paper ledger, checkpoints, KILL switch
       - logs:/app/logs
     # Let a running trade finish placing its order and stop loss before the container is killed.
     stop_grace_period: 2m
-
-  report:                          # read-only report page: http://127.0.0.1:8080
-    image: tr-automation-bot       # same image as the bot, no secrets, logs mounted read-only
-    command: python -m monitoring.web
-    restart: unless-stopped
-    environment:
-      REPORT_HOST: 0.0.0.0         # inside the container; the port below is published to this machine only
-    volumes:
-      - logs:/app/logs:ro
-    ports:
-      - "127.0.0.1:8080:8080"     # not reachable from other machines; from elsewhere use an SSH tunnel
-    depends_on:
-      - bot
 
 volumes:
   state:
