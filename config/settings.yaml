@@ -1,0 +1,25 @@
+exchange: binance                # any ccxt exchange id that has a sandbox
+symbols: [BTC/USDT, ETH/USDT]    # also the risk guard's allowlist
+timeframe: 15m
+run_interval_minutes: 15
+live_trading: false              # live also needs LIVE_TRADING=true in .env
+
+risk:
+  max_position_pct: 0.02
+  max_total_exposure_pct: 0.20
+  max_daily_loss_pct: 0.03
+  max_drawdown_pct: 0.10
+  max_orders_per_hour: 4
+  kill_switch_file: KILL         # create this file to stop all trading
+
+llm:
+  providers:                     # first is primary, second is the fallback
+    - name: openrouter
+      base_url: https://openrouter.ai/api/v1
+      api_key_env: OPENROUTER_API_KEY
+    - name: fastrouter
+      base_url: ""               # fill in from FastRouter's docs
+      api_key_env: FASTROUTER_API_KEY
+  models:
+    fast: ""                     # market and sentiment agents
+    reasoning: ""                # decision agent
