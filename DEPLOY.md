@@ -23,23 +23,23 @@ Run each command in a terminal and wait for it to finish before the next one.
 
 ---
 
-## Step 1. Copy the project to the server
+## Step 1. Get the code and your `.env` onto the server
 
-First, on your **laptop**, open `.env` and empty `EXCHANGE_API_KEY` and `EXCHANGE_API_SECRET`. Paper trading
-never uses them, and this way your real Binance key is never copied to the server.
-
-Then copy the project, also on your **laptop**:
+On the **server**, clone the project from GitHub:
 
 ```bash
-rsync -av --exclude .venv --exclude state --exclude logs --exclude __pycache__ --exclude .pytest_cache ~/Documents/TR-automation/ you@your-server:~/TR-automation/
+git clone https://github.com/bibindasb/Trading_Bot.git
 ```
 
-This copies the code, your settings and your `.env` (through SSH, so it stays encrypted on the way).
-It leaves out the laptop's paper account, so the server starts fresh at $100.
+Your `.env` holds your keys, so it is not on GitHub, on purpose. First, on your **laptop**, open `.env` and
+empty `EXCHANGE_API_KEY` and `EXCHANGE_API_SECRET`. Paper trading never uses them, and this way your real
+Binance key is never copied to the server. Then copy it over, also from your **laptop**:
 
-If the server says `rsync: command not found`, install it there first (`sudo apt-get install -y rsync`).
+```bash
+scp ~/Documents/TR-automation/.env you@your-server:~/Trading_Bot/.env
+```
 
-Keep the folder name `TR-automation`. The commands below rely on it.
+The server starts with its own fresh paper account at $100. The laptop's paper account stays on the laptop.
 
 ---
 
@@ -79,7 +79,7 @@ Docker now starts by itself when the server reboots, and so does the bot.
 Still on the server:
 
 ```bash
-cd ~/TR-automation && chmod 600 .env && nano .env
+cd ~/Trading_Bot && chmod 600 .env && nano .env
 ```
 
 Make sure that:
@@ -190,7 +190,7 @@ cd ~/Documents/TR-automation && sudo docker compose down
 
 ## Everyday commands (on the server)
 
-Run these from the project folder, so start with `cd ~/TR-automation`.
+Run these from the project folder, so start with `cd ~/Trading_Bot`.
 
 | To do this | Run |
 |---|---|
@@ -203,25 +203,20 @@ Run these from the project folder, so start with `cd ~/TR-automation`.
 | Stop the bot completely | `sudo docker compose stop` |
 | Start it again | `sudo docker compose up -d` |
 | Check everything again | `sudo docker compose run --rm bot python validate.py` |
-| **Start the paper account over at $100** (deletes its history) | `sudo docker compose down && sudo docker volume rm tr-automation_state tr-automation_logs && sudo docker compose up -d` |
+| **Start the paper account over at $100** (deletes its history) | `sudo docker compose down -v && sudo docker compose up -d` |
 
 Changing `starting_cash` in the settings only takes effect after starting the paper account over.
 
 ### Updating the code later
 
-Make changes on your laptop, then copy them over without replacing the server's `.env`:
+Push your changes to GitHub from the laptop, then on the server:
 
 ```bash
-rsync -av --exclude .env --exclude .venv --exclude state --exclude logs --exclude __pycache__ --exclude .pytest_cache ~/Documents/TR-automation/ you@your-server:~/TR-automation/
+cd ~/Trading_Bot && git pull && sudo docker compose up -d --build
 ```
 
-Then on the server:
-
-```bash
-cd ~/TR-automation && sudo docker compose up -d --build
-```
-
-This also copies `config/settings.yaml` from the laptop, so make settings changes there too.
+`git pull` never touches the server's `.env`. It does update `config/settings.yaml`, so make settings changes
+on the laptop and push them, rather than editing them on the server.
 
 ---
 
