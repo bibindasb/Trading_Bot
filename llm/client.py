@@ -24,7 +24,8 @@ class LLMClient:
                   f"{json.dumps(schema.model_json_schema())}")
         tried = False
         for p in self.cfg["providers"]:
-            model, key = p["models"].get(tier), os.getenv(p["api_key_env"])
+            model_env = p["model_env"].get(tier)
+            model, key = os.getenv(model_env) if model_env else None, os.getenv(p["api_key_env"])
             if not (p["base_url"] and model and key):
                 continue
             tried = True

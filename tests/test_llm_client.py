@@ -13,9 +13,9 @@ class Score(BaseModel):
 
 SETTINGS = {"llm": {"timeout_seconds": 30, "max_retries": 2, "providers": [
     {"name": "primary", "base_url": "https://primary.test/v1", "api_key_env": "PRIMARY_KEY",
-     "models": {"fast": "a/fast", "reasoning": "a/think"}},
+     "model_env": {"fast": "PRIMARY_FAST", "reasoning": "PRIMARY_THINK"}},
     {"name": "backup", "base_url": "https://backup.test/v1", "api_key_env": "BACKUP_KEY",
-     "models": {"fast": "b/fast", "reasoning": "b/think"}},
+     "model_env": {"fast": "BACKUP_FAST", "reasoning": "BACKUP_THINK"}},
 ]}}
 
 
@@ -45,8 +45,9 @@ def calls(monkeypatch):
             return AIMessage(content=reply)
 
     monkeypatch.setattr(client_module, "ChatOpenAI", FakeChat)
-    monkeypatch.setenv("PRIMARY_KEY", "k1")
-    monkeypatch.setenv("BACKUP_KEY", "k2")
+    for name, value in {"PRIMARY_KEY": "k1", "BACKUP_KEY": "k2", "PRIMARY_FAST": "a/fast", "PRIMARY_THINK": "a/think",
+                        "BACKUP_FAST": "b/fast", "BACKUP_THINK": "b/think"}.items():
+        monkeypatch.setenv(name, value)
     return calls
 
 
@@ -109,7 +110,7 @@ def test_unconfigured_provider_is_skipped(calls, monkeypatch, missing):
     if missing == "base_url":
         primary["base_url"] = ""
     elif missing == "model":
-        primary["models"] = {"fast": "", "reasoning": "a/think"}
+        monkeypatch.delenv("PRIMARY_FAST")
     else:
         monkeypatch.delenv("PRIMARY_KEY")
     settings = {"llm": {**SETTINGS["llm"], "providers": [primary, SETTINGS["llm"]["providers"][1]]}}

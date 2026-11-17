@@ -35,12 +35,12 @@ llm:
     - name: openrouter
       base_url: https://openrouter.ai/api/v1
       api_key_env: OPENROUTER_API_KEY
-      models:                    # provider/model IDs; a blank model skips this provider for that tier
-        fast: ""                 # market and sentiment agents
-        reasoning: ""            # decision agent
+      model_env:                 # .env variables holding provider/model IDs; unset skips this provider for that tier
+        fast: OPENROUTER_FAST_MODEL            # market, sentiment and risk agents
+        reasoning: OPENROUTER_REASONING_MODEL  # decision agent
     - name: fastrouter
       base_url: https://api.fastrouter.ai/api/v1
       api_key_env: FASTROUTER_API_KEY
-      models:
-        fast: ""
-        reasoning: ""
+      model_env:
+        fast: FASTROUTER_FAST_MODEL
+        reasoning: FASTROUTER_REASONING_MODEL
