@@ -46,7 +46,7 @@ def test_setup_twice_does_not_double_lines_and_quiets_url_loggers(log_file):
     setup_logging(log_file)
     logging.getLogger("x").info("once")
     assert [e["msg"] for e in lines(log_file)].count("once") == 1
-    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("httpx").level == logging.WARNING == logging.getLogger("httpx2").level
 
 
 # --- alerts ---

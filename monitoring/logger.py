@@ -9,7 +9,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 # These log full request URLs at INFO, and the Telegram URL contains the bot token.
-QUIET = ("httpx", "httpcore", "openai")
+QUIET = ("httpx", "httpcore", "httpx2", "httpcore2", "openai")  # httpx2: used by openai
 
 
 class JsonFormatter(logging.Formatter):

@@ -294,7 +294,7 @@ def main():
 
     load_dotenv()
     logging.basicConfig(level=logging.WARNING, format="        log: %(message)s")
-    for noisy in ("httpx", "httpcore", "openai"):
+    for noisy in ("httpx", "httpcore", "httpx2", "httpcore2", "openai"):
         logging.getLogger(noisy).setLevel(logging.ERROR)
     settings = yaml.safe_load(open("config/settings.yaml"))
 
