@@ -5,15 +5,15 @@ run_interval_minutes: 15
 live_trading: false              # live also needs LIVE_TRADING=true in .env
 paper_trading: true              # when not live: true = simulated fills, false = real orders on the testnet
 paper:
-  starting_cash: 10000           # in the quote currency (USDT)
+  starting_cash: 100             # in the quote currency (USDT)
   fee_pct: 0.001
 backtest:
   slippage_pct: 0.0005           # fills this far beyond the candle close (buys above, sells below)
 
 risk:
-  max_position_pct: 0.02
-  max_order_usdt: null           # fixed cap per trade in USDT, e.g. 10; null = only the % limit above
-  max_total_exposure_pct: 0.20
+  max_position_pct: 0.15         # 15% of the account per trade
+  max_order_usdt: 15             # fixed cap per trade in USDT; null = only the % limit above
+  max_total_exposure_pct: 0.30   # at most two $15 trades open at once
   max_daily_loss_pct: 0.03
   max_drawdown_pct: 0.10
   max_orders_per_hour: 4
