@@ -3,6 +3,10 @@ symbols: [BTC/USDT, ETH/USDT]    # also the risk guard's allowlist
 timeframe: 15m
 run_interval_minutes: 15
 live_trading: false              # live also needs LIVE_TRADING=true in .env
+paper_trading: true              # when not live: true = simulated fills, false = real orders on the testnet
+paper:
+  starting_cash: 10000           # in the quote currency (USDT)
+  fee_pct: 0.001
 
 risk:
   max_position_pct: 0.02
