@@ -86,7 +86,8 @@ class PaperExchange:
         else:
             total[base] -= order["amount"]
             total[quote] = (total.get(quote) or 0.0) + cost * (1 - self.fee)
-        order.update(filled=order["amount"], remaining=0.0, status="closed", average=price, cost=cost)
+        order.update(filled=order["amount"], remaining=0.0, status="closed", average=price, cost=cost,
+                     lastTradeTimestamp=self.market.milliseconds())
 
     def _trigger_stops(self):
         now = self.market.milliseconds()

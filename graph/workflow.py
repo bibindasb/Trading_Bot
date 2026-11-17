@@ -51,15 +51,16 @@ def make_checkpointer(path: str | Path = "state/checkpoints.sqlite") -> SqliteSa
     return SqliteSaver(sqlite3.connect(path, check_same_thread=False))
 
 
-def build_graph(settings: dict, market, executor, client, checkpointer=None):
-    """market: data-layer ccxt exchange. executor: execution.executor.Executor. client: llm.client.LLMClient."""
+def build_graph(settings: dict, market, executor, client, checkpointer=None, news=None):
+    """market: data-layer ccxt exchange. executor: execution.executor.Executor. client: llm.client.LLMClient.
+    news: settings -> {symbol: headlines}; the backtest passes one that returns none."""
     symbols, guard = settings["symbols"], executor.guard
 
     def fetch(state):
         snapshot = fetch_all(market, settings)
         return {"prices": {s: m["ticker"]["last"] for s, m in snapshot.items()},
                 "indicators": {s: market_agent.indicators(m["ohlcv"]) for s, m in snapshot.items()},
-                "headlines": fetch_headlines(settings)}
+                "headlines": (news or fetch_headlines)(settings)}
 
     def account(state):
         prices = state["prices"]

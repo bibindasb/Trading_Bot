@@ -7,6 +7,8 @@ paper_trading: true              # when not live: true = simulated fills, false 
 paper:
   starting_cash: 10000           # in the quote currency (USDT)
   fee_pct: 0.001
+backtest:
+  slippage_pct: 0.0005           # fills this far beyond the candle close (buys above, sells below)
 
 risk:
   max_position_pct: 0.02

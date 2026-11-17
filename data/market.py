@@ -23,6 +23,11 @@ def make_exchange(settings: dict) -> ccxt.Exchange:
     return exchange
 
 
+def make_public_exchange(settings: dict) -> ccxt.Exchange:
+    """Real market data with no API keys, so it cannot trade. For backtests."""
+    return getattr(ccxt, settings["exchange"])({"enableRateLimit": True})
+
+
 def fetch_ohlcv(exchange, symbol: str, timeframe: str, limit: int = 200) -> pd.DataFrame:
     df = pd.DataFrame(exchange.fetch_ohlcv(symbol, timeframe, limit=limit), columns=COLUMNS)
     # Drop the candle still forming, so live signals match what a backtest sees.

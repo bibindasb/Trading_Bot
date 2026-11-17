@@ -29,17 +29,18 @@ def _require(ok: bool, message: str) -> None:
 
 
 class RiskGuard:
-    def __init__(self, settings: dict, state_path: str | Path = "state/risk_state.json"):
+    def __init__(self, settings: dict, state_path: str | Path = "state/risk_state.json", clock=time.time):
         self.limits = settings["risk"]
         self.allowlist = set(settings["symbols"])
         self.kill_file = Path(self.limits["kill_switch_file"])
         self.state_path = Path(state_path)
+        self.clock = clock  # seconds since epoch; the backtest replays its own
 
     def halts(self, equity: float, now: float | None = None) -> list[str]:
         """Record equity and return why all trading is stopped (empty = not stopped). Call every run, even on HOLD."""
         try:
             state = self._load()
-            reasons = self._halts(state, equity, time.time() if now is None else now)
+            reasons = self._halts(state, equity, self.clock() if now is None else now)
             self._save(state)
             return reasons
         except Exception as e:
@@ -60,7 +61,7 @@ class RiskGuard:
         order: Order or dict. positions: symbol -> base amount held. prices: symbol -> current market price.
         """
         try:
-            now = time.time() if now is None else now
+            now = self.clock() if now is None else now
             # Validate every input before touching state, so a bad call cannot half-update it.
             order = Order.model_validate(order)
             _require(all(math.isfinite(a) and a >= 0 for a in positions.values()), "invalid position amount")
