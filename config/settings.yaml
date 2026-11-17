@@ -16,6 +16,16 @@ risk:
   max_orders_per_hour: 4
   kill_switch_file: state/KILL   # create this file to stop all trading; delete it to resume
 
+news:
+  feeds:                         # RSS 2.0 feeds; headlines are untrusted and only reach the sentiment agent
+    - https://www.coindesk.com/arc/outboundfeeds/rss/
+    - https://cointelegraph.com/rss
+    - https://decrypt.co/feed
+  max_age_hours: 24
+  keywords:                      # whole words that tie a headline to a coin
+    BTC: [bitcoin, btc]
+    ETH: [ethereum, eth, ether]
+
 llm:
   timeout_seconds: 60            # per request
   max_retries: 2                 # per provider, on timeouts, rate limits and server errors
