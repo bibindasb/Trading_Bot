@@ -128,3 +128,11 @@ def test_jobs_never_raise(paper_executor, monkeypatch):
     scheduler.get_job("trade").func()
     scheduler.get_job("summary").func()
     assert str(alerter.failed[0]) == "down"
+
+
+def test_open_dashboard_without_password_is_not_started(monkeypatch):
+    monkeypatch.setenv("REPORT_BIND", "0.0.0.0")
+    monkeypatch.delenv("REPORT_PASSWORD", raising=False)
+    alerter = Recorder()
+    assert main.start_report(alerter) is None
+    assert "REPORT_PASSWORD" in alerter.sent[0]

@@ -7,6 +7,8 @@ Headlines and model text are untrusted: everything is HTML-escaped and the page 
 main.py serves it alongside the bot at http://127.0.0.1:8080 (REPORT_HOST / REPORT_PORT to change).
 Standalone: .venv/bin/python -m monitoring.web
 """
+import base64
+import hmac
 import html
 import json
 import os
@@ -408,10 +410,43 @@ def load_settings() -> dict:
         return {}
 
 
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+MIN_PASSWORD = 12
+
+
+def exposure_problem() -> str | None:
+    """The page has no other protection, so opening it beyond this machine needs a strong password.
+
+    REPORT_BIND is where Docker publishes the page on the server; REPORT_HOST where a local run listens."""
+    where = os.getenv("REPORT_BIND") or os.getenv("REPORT_HOST") or "127.0.0.1"
+    if where in LOOPBACK or len(os.getenv("REPORT_PASSWORD") or "") >= MIN_PASSWORD:
+        return None
+    return (f"the dashboard would be open to the network ({where}) without a password: set REPORT_PASSWORD "
+            f"in .env to at least {MIN_PASSWORD} characters")
+
+
 class Handler(BaseHTTPRequestHandler):
     log_path = Path(os.getenv("REPORT_LOG", "logs/bot.jsonl"))
 
+    def authorized(self) -> bool:
+        """HTTP Basic login when REPORT_PASSWORD is set: any username, that password."""
+        password = os.getenv("REPORT_PASSWORD")
+        if not password:
+            return True
+        scheme, _, encoded = self.headers.get("Authorization", "").partition(" ")
+        try:
+            given = base64.b64decode(encoded, validate=True).decode().partition(":")[2]
+        except ValueError:  # covers bad base64 and bad UTF-8
+            return False
+        return scheme == "Basic" and hmac.compare_digest(given.encode(), password.encode())
+
     def do_GET(self):
+        if not self.authorized():
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Trading bot", charset="UTF-8"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         url = urlparse(self.path)
         if url.path != "/":
             self.send_error(404)
@@ -435,6 +470,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_server() -> ThreadingHTTPServer:
+    problem = exposure_problem()
+    if problem:
+        raise ValueError(problem)
     return ThreadingHTTPServer((os.getenv("REPORT_HOST", "127.0.0.1"), int(os.getenv("REPORT_PORT", "8080"))), Handler)
 
 

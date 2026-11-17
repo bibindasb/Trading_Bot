@@ -146,3 +146,59 @@ def test_fixed_cap_and_too_small_account_are_explained():
     assert "$10.00" in capped and "never more than $10.00" in capped
     tiny = web.page([{**TRADE_RUN, "account": {"equity": 10.0}}], {**SETTINGS, "risk": RISK}, NOW)
     assert "cannot trade" in tiny  # 2% of $10 is $0.20, under Binance's $5 minimum
+
+
+# --- login and network exposure ---
+
+def get(url, user=None, password=None):
+    import base64
+
+    request = urllib.request.Request(url)
+    if password is not None:
+        token = base64.b64encode(f"{user}:{password}".encode()).decode()
+        request.add_header("Authorization", f"Basic {token}")
+    try:
+        with urllib.request.urlopen(request) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as err:
+        return err.code, err.headers.get("WWW-Authenticate", "")
+
+
+def test_password_protects_the_page(server, monkeypatch):
+    monkeypatch.setenv("REPORT_PASSWORD", "correct horse battery")
+    status, challenge = get(server + "/")
+    assert status == 401 and challenge.startswith("Basic")  # the browser shows its login box
+    assert get(server + "/", "bot", "wrong password")[0] == 401
+    assert get(server + "/", "anyone", "correct horse battery")[0] == 200  # any username works
+    assert get(server + "/../state/x", "bot", "nope")[0] == 401  # nothing at all without the password
+
+
+def test_garbled_login_header_is_refused(server, monkeypatch):
+    monkeypatch.setenv("REPORT_PASSWORD", "correct horse battery")
+    request = urllib.request.Request(server + "/", headers={"Authorization": "Basic %%%not-base64"})
+    with pytest.raises(urllib.error.HTTPError) as err:
+        urllib.request.urlopen(request)
+    assert err.value.code == 401
+
+
+def test_no_password_needed_on_this_machine_only(monkeypatch):
+    for name in ("REPORT_BIND", "REPORT_HOST", "REPORT_PASSWORD"):
+        monkeypatch.delenv(name, raising=False)
+    assert web.exposure_problem() is None
+    monkeypatch.setenv("REPORT_BIND", "127.0.0.1")
+    monkeypatch.setenv("REPORT_HOST", "0.0.0.0")  # inside Docker, published to this machine only
+    assert web.exposure_problem() is None
+
+
+@pytest.mark.parametrize("env", [{"REPORT_BIND": "0.0.0.0"}, {"REPORT_BIND": "0.0.0.0", "REPORT_PASSWORD": "short"},
+                                 {"REPORT_HOST": "0.0.0.0"}])
+def test_network_exposure_needs_a_strong_password(monkeypatch, env):
+    for name in ("REPORT_BIND", "REPORT_HOST", "REPORT_PASSWORD"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    assert "REPORT_PASSWORD" in web.exposure_problem()
+    with pytest.raises(ValueError):
+        web.make_server()
+    monkeypatch.setenv("REPORT_PASSWORD", "a long enough password")
+    assert web.exposure_problem() is None

@@ -163,17 +163,39 @@ The `STATUS` column should say `Up`. The bot checks the market once at start, th
 
 ## Step 7. Open the dashboard from your laptop
 
-The dashboard only listens inside the server, so nobody else can reach it. Open a tunnel from your **laptop**,
-and leave this terminal open:
+The dashboard shows the account value, what each agent thought on every check, every trade, and your money
+rules. By default it only listens inside the server. There are two ways to open it.
+
+**A. Through an SSH tunnel (the default, nothing to set up).** On your **laptop**, run this and leave the
+terminal open:
 
 ```bash
 ssh -N -L 8081:localhost:8080 you@your-server
 ```
 
-Then open **http://127.0.0.1:8081** in your laptop's browser. It shows the account value, what each agent
-thought on every check, every trade, and your money rules.
+Then open **http://127.0.0.1:8081**. That address is your laptop's end of the tunnel: the page itself comes
+from the server.
 
-**Never open port 8080 in the server's firewall or cloud security group.** The tunnel is the safe way in.
+**B. At the server's address, with a password (office network only).** On the **server**, add these two
+lines to `.env`, with your own password of at least 12 characters:
+
+```
+REPORT_BIND=0.0.0.0
+REPORT_PASSWORD=choose-a-long-password
+```
+
+Apply them:
+
+```bash
+sudo docker compose up -d --force-recreate
+```
+
+Then open **http://your-server-address:8080**. The browser asks for a login: type any username, for
+example `bot`, and your password. If `REPORT_PASSWORD` is missing or shorter than 12 characters, the bot keeps
+trading but refuses to open the dashboard, and says why in its log.
+
+The connection is plain `http`, so the page and the password cross the network unencrypted. Use B only on a
+trusted office network, **never on a server with a public internet address**. There, use the tunnel.
 
 ---
 
@@ -257,6 +279,8 @@ account over and count the 4 weeks again. Otherwise the result mixes two setups.
 | The build fails pulling `python:3.12-slim` | Docker Hub is blocked. Ask your IT team for a Docker registry mirror. |
 | Compose complains about `env_file` or `required` | Docker Compose is too old. Install 2.24 or newer (Step 2). |
 | A warning about "Bake" and "buildx isn't installed" | Harmless. Docker uses its built-in builder instead. |
-| The dashboard does not open | Check that the tunnel terminal (Step 7) is still open, and that `sudo docker compose ps` shows `Up`. |
+| The dashboard does not open | With the tunnel: check that its terminal (Step 7) is still open. Either way: check that `sudo docker compose ps` shows `Up`. |
+| The dashboard does not open at the server's address | Check `.env` has `REPORT_BIND=0.0.0.0` and a `REPORT_PASSWORD` of 12+ characters, and that you ran `sudo docker compose up -d --force-recreate`. `sudo docker compose logs bot \| grep report` says whether the page started. A firewall between you and the server may also block port 8080. |
+| The browser keeps asking for the login | Wrong password. Any username works, but the password must match `REPORT_PASSWORD` exactly. |
 | "Last check" is more than 20 minutes ago | Something stopped. Read `sudo docker compose logs --tail 50 bot`. |
 | Status says **Paused** | Read the reason on the dashboard. A daily loss pause lifts by itself at midnight UTC. A drawdown stop or your kill switch needs `sudo docker compose exec bot rm state/KILL`, after you have looked at what happened. |

@@ -50,7 +50,7 @@ def start_report(alerter):
     """Serve the report page from this process. If it cannot start, trading carries on without it."""
     try:
         server = make_server()
-    except OSError as e:
+    except (OSError, ValueError) as e:  # port taken, or open to the network without a password
         log.error("report page not started: %r", e)
         alerter.send(f"WARNING: report page not started: {e!r}")
         return None
