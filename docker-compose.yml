@@ -1,6 +1,12 @@
 services:
   bot:
-    build: .
+    build:
+      context: .
+      network: host                # build with the host's DNS and routes, so private package mirrors resolve
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        PIP_EXTRA_INDEX_URL: ${PIP_EXTRA_INDEX_URL:-}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     restart: unless-stopped
     env_file:
       - path: .env
